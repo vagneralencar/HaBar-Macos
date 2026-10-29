@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 public struct HaBarApp: App {
-    @StateObject private var store = HomeAssistantStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     public init() {
         let args = CommandLine.arguments
@@ -17,18 +18,92 @@ public struct HaBarApp: App {
     }
 
     public var body: some Scene {
-        MenuBarExtra {
-            MainPopoverView(store: store)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "house.fill")
-                if store.activeLightsCount > 0 {
-                    Text("\(store.activeLightsCount)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                }
-            }
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+    }
+}
+
+@MainActor
+public final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem!
+    private let popover = NSPopover()
+    private let store = HomeAssistantStore()
+    private var cancellables = Set<AnyCancellable>()
+    private var eventMonitor: Any?
+
+    public func applicationDidFinishLaunching(_ notification: Notification) {
+        setupPopover()
+        setupStatusItem()
+        observeStoreChanges()
+        setupOutsideClickMonitor()
+    }
+
+    private func setupPopover() {
+        let rootView = MainPopoverView(store: store)
+        let hostingController = NSHostingController(rootView: rootView)
+        hostingController.sizingOptions = [.preferredContentSize]
+
+        popover.contentViewController = hostingController
+        popover.behavior = .transient
+        popover.animates = true
+        popover.appearance = NSAppearance(named: .darkAqua)
+    }
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        guard let button = statusItem.button else { return }
+
+        button.imagePosition = .imageLeading
+        button.target = self
+        button.action = #selector(togglePopover(_:))
+        updateStatusButtonLabel(activeCount: store.activeLightsCount)
+    }
+
+    private func observeStoreChanges() {
+        store.$devices
+            .map { devices in
+                devices.reduce(0) { $0 + ($1.isOn ? 1 : 0) }
+            }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] activeCount in
+                self?.updateStatusButtonLabel(activeCount: activeCount)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateStatusButtonLabel(activeCount: Int) {
+        guard let button = statusItem?.button else { return }
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        let icon = NSImage(systemSymbolName: "house.fill", accessibilityDescription: "HaBar")?.withSymbolConfiguration(config)
+        icon?.isTemplate = true
+        button.image = icon
+
+        if activeCount > 0 {
+            button.title = " \(activeCount)"
+            button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        } else {
+            button.title = ""
+        }
+    }
+
+    @objc private func togglePopover(_ sender: AnyObject?) {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    private func setupOutsideClickMonitor() {
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self, self.popover.isShown else { return }
+            self.popover.performClose(nil)
+        }
     }
 }
 
@@ -40,13 +115,11 @@ enum ScreenshotExporter {
 
         let demoStore = HomeAssistantStore.makeScreenshotDemoStore()
 
-        // 1. Render Main Dashboard Popover
         let dashboardFrame = PopoverScreenshotFrame {
             MainPopoverView(store: demoStore)
         }
         renderView(dashboardFrame, to: dirURL.appendingPathComponent("habar-dashboard.png"))
 
-        // 2. Render Light Detail View (RGB / Kelvin / Effects)
         if let firstLight = demoStore.devices.first {
             demoStore.selectedDeviceForDetail = firstLight
         }

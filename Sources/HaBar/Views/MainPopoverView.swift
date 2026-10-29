@@ -48,6 +48,7 @@ public struct MainPopoverView: View {
             }
         }
         .frame(width: AppTheme.popoverWidth)
+        .fixedSize(horizontal: false, vertical: true)
         .preferredColorScheme(.dark)
     }
 
