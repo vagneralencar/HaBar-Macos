@@ -83,6 +83,120 @@ public extension View {
     }
 }
 
+// MARK: - Smart Truncation Detector & Hover Popover Bubble (DRY)
+
+public struct TruncatedTextWithPopover: View {
+    public let displayText: String
+    public let fullText: String
+    public let font: Font
+    public let foregroundColor: Color
+    public let isParentHovered: Bool
+
+    @State private var intrinsicWidth: CGFloat = 0
+    @State private var availableWidth: CGFloat = 0
+
+    public init(
+        _ displayText: String,
+        fullText: String? = nil,
+        font: Font,
+        foregroundColor: Color,
+        isParentHovered: Bool
+    ) {
+        self.displayText = displayText
+        self.fullText = fullText ?? displayText
+        self.font = font
+        self.foregroundColor = foregroundColor
+        self.isParentHovered = isParentHovered
+    }
+
+    private var isAbbreviatedOrTruncated: Bool {
+        displayText != fullText || (availableWidth > 0 && intrinsicWidth > availableWidth + 1.5)
+    }
+
+    public var body: some View {
+        Text(displayText)
+            .font(font)
+            .foregroundColor(foregroundColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { availableWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, newWidth in
+                            availableWidth = newWidth
+                        }
+                }
+            )
+            .background(
+                Text(displayText)
+                    .font(font)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .hidden()
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { intrinsicWidth = proxy.size.width }
+                                .onChange(of: proxy.size.width) { _, newWidth in
+                                    intrinsicWidth = newWidth
+                                }
+                        }
+                    )
+            )
+            .overlay(alignment: .topLeading) {
+                if isParentHovered && isAbbreviatedOrTruncated {
+                    HoverPopoverBubble(text: fullText)
+                        .offset(y: -34)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottom)))
+                        .zIndex(999)
+                }
+            }
+            .animation(.easeOut(duration: 0.14), value: isParentHovered)
+    }
+}
+
+public struct HoverPopoverBubble: View {
+    public let text: String
+
+    public var body: some View {
+        VStack(alignment: .center, spacing: 0) {
+            Text(text)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color(red: 0.16, green: 0.16, blue: 0.20).opacity(0.98))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(AppTheme.amberAccent.opacity(0.55), lineWidth: 1)
+                )
+
+            PopoverArrowTriangle()
+                .fill(Color(red: 0.16, green: 0.16, blue: 0.20).opacity(0.98))
+                .frame(width: 10, height: 5)
+        }
+        .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 4)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct PopoverArrowTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Reusable Circular Header & Back Buttons
 
 public struct CircularIconButton: View {

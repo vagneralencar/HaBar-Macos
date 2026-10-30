@@ -213,61 +213,25 @@ public struct MainPopoverView: View {
         }
     }
 
-    // MARK: - Zero-Scroll Room Selector Grid (All Rooms Visible at a Glance)
+    // MARK: - Zero-Scroll Room Selector Grid
 
     private var roomTabsSection: some View {
         LazyVGrid(columns: Self.fourColumnRoomGrid, spacing: 6) {
             ForEach(store.rooms) { room in
-                let isSelected = (store.selectedRoom.id == room.id)
-                let hasActive = store.hasActiveDevice(in: room)
-
-                Button {
+                RoomPillButton(
+                    room: room,
+                    isSelected: store.selectedRoom.id == room.id,
+                    hasActive: store.hasActiveDevice(in: room)
+                ) {
                     withAnimation(.easeInOut(duration: 0.16)) {
                         store.selectedRoom = room
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: room.iconSystemName)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(
-                                isSelected
-                                    ? AppTheme.amberAccent
-                                    : (hasActive ? AppTheme.amberAccent.opacity(0.85) : .white.opacity(0.52))
-                            )
-
-                        Text(room.shortDisplayName)
-                            .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                            .foregroundColor(.white.opacity(isSelected ? 1.0 : 0.72))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-
-                        if hasActive && room.id != HARoom.favorites.id {
-                            Circle()
-                                .fill(AppTheme.amberAccent)
-                                .frame(width: 5, height: 5)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(isSelected ? Color.white.opacity(0.18) : Color.white.opacity(0.04))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(
-                                isSelected ? Color.white.opacity(0.28) : Color.white.opacity(0.07),
-                                lineWidth: 1
-                            )
-                    )
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
-    // MARK: - Devices Section (Direct Intrinsic Grid — Never Collapses)
+    // MARK: - Devices Section
 
     private var devicesSection: some View {
         let items = store.filteredDevices
@@ -350,11 +314,71 @@ public struct MainPopoverView: View {
     }
 }
 
-// MARK: - Scene Pill Card
+// MARK: - Room Pill Button (Shows Popover when Abbreviated)
+
+private struct RoomPillButton: View {
+    let room: HARoom
+    let isSelected: Bool
+    let hasActive: Bool
+    let action: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: room.iconSystemName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(
+                        isSelected
+                            ? AppTheme.amberAccent
+                            : (hasActive ? AppTheme.amberAccent.opacity(0.85) : .white.opacity(0.52))
+                    )
+
+                TruncatedTextWithPopover(
+                    room.shortDisplayName,
+                    fullText: room.name,
+                    font: .system(size: 11, weight: isSelected ? .semibold : .medium),
+                    foregroundColor: .white.opacity(isSelected ? 1.0 : 0.72),
+                    isParentHovered: isHovered
+                )
+
+                if hasActive && room.id != HARoom.favorites.id {
+                    Circle()
+                        .fill(AppTheme.amberAccent)
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.white.opacity(0.18) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.white.opacity(0.28) : Color.white.opacity(0.07),
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .zIndex(isHovered ? 100 : 1)
+    }
+}
+
+// MARK: - Scene Pill Card (Shows Popover when Truncated)
 
 private struct ScenePillCard: View {
     let scene: HASceneItem
     let action: () -> Void
+
+    @State private var isHovered: Bool = false
 
     var body: some View {
         Button(action: action) {
@@ -369,10 +393,12 @@ private struct ScenePillCard: View {
                         .foregroundColor(scene.isActive ? .white : .white.opacity(0.78))
                 }
 
-                Text(scene.name)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(scene.isActive ? 1.0 : 0.88))
-                    .lineLimit(1)
+                TruncatedTextWithPopover(
+                    scene.name,
+                    font: .system(size: 12.5, weight: .semibold),
+                    foregroundColor: .white.opacity(scene.isActive ? 1.0 : 0.88),
+                    isParentHovered: isHovered
+                )
 
                 Spacer(minLength: 0)
             }
@@ -410,16 +436,22 @@ private struct ScenePillCard: View {
             )
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .zIndex(isHovered ? 100 : 1)
     }
 }
 
-// MARK: - Device Control Card
+// MARK: - Device Control Card (Shows Popover when Name is Truncated)
 
 private struct DeviceControlCard: View {
     let device: HADeviceItem
     let onToggle: () -> Void
     let onOpenDetail: () -> Void
     let onBrightnessChange: (Double) -> Void
+
+    @State private var isHovered: Bool = false
 
     var body: some View {
         let accent = device.accentColor
@@ -442,10 +474,12 @@ private struct DeviceControlCard: View {
 
                 Button(action: onOpenDetail) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(device.name)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white.opacity(device.isOn ? 0.98 : 0.82))
-                            .lineLimit(1)
+                        TruncatedTextWithPopover(
+                            device.name,
+                            font: .system(size: 12, weight: .semibold),
+                            foregroundColor: .white.opacity(device.isOn ? 0.98 : 0.82),
+                            isParentHovered: isHovered
+                        )
 
                         Text(device.formattedStatusLine)
                             .font(.system(size: 10.5, weight: .medium))
@@ -470,7 +504,6 @@ private struct DeviceControlCard: View {
                             .foregroundColor(.white.opacity(0.38))
                     }
                     .buttonStyle(.plain)
-                    .help("Abrir controle de Cor, Temperatura e Efeitos")
                 }
             }
 
@@ -495,5 +528,9 @@ private struct DeviceControlCard: View {
             borderColor: device.isOn ? accent.opacity(0.42) : Color.white.opacity(0.09),
             lineWidth: 1.1
         )
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .zIndex(isHovered ? 100 : 1)
     }
 }
