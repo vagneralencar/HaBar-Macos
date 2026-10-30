@@ -77,7 +77,16 @@ public struct MainPopoverView: View {
     }
 
     private var headerSection: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 10) {
+            if let appIcon = NSApplication.shared.applicationIconImage {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
                 Text("HaBar")
                     .font(.system(size: 20, weight: .bold))

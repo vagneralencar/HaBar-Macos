@@ -18,6 +18,10 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp ".build/release/HaBar" "${MACOS_DIR}/HaBar"
 chmod +x "${MACOS_DIR}/HaBar"
 
+if [ -f "Assets/AppIcon.icns" ]; then
+    cp "Assets/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+fi
+
 cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +31,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <string>pt_BR</string>
     <key>CFBundleExecutable</key>
     <string>HaBar</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>io.github.habar.menubar</string>
     <key>CFBundleInfoDictionaryVersion</key>

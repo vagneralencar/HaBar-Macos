@@ -1,6 +1,13 @@
-# HaBar — Native macOS Menu Bar Controller for Home Assistant
+<p align="center">
+  <img src="docs/logo.png" alt="HaBar Logo" width="140" height="140" />
+</p>
 
-**HaBar** is a lightweight, 100% native macOS Menu Bar application (`Swift` + `SwiftUI` `MenuBarExtra`) designed to control **Home Assistant** scenes, smart lights (brightness, color temperature, RGB spectrum, effects), and switches directly from the macOS menu bar with Control Center aesthetics.
+<h1 align="center">HaBar</h1>
+
+<p align="center">
+  <strong>Native macOS Menu Bar Controller for Home Assistant</strong><br/>
+  Control scenes, smart lights (RGB, Kelvin, Dimmer, Effects), and switches directly from the macOS Menu Bar.
+</p>
 
 ---
 
@@ -31,7 +38,7 @@
 
 ```
 Sources/HaBar/
-├── HaBarApp.swift                   # MenuBarExtra(.window) entry point
+├── HaBarApp.swift                   # NSStatusItem + NSPopover entry point
 ├── Theme/
 │   └── AppTheme.swift               # Centralized design tokens & DRY view modifiers
 ├── Models/
