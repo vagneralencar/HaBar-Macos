@@ -96,15 +96,15 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
 
     public var activeLightsCount: Int {
         devices.reduce(0) { count, item in
-            count + (item.isOn ? 1 : 0)
+            count + (item.domain != .script && item.isOn ? 1 : 0)
         }
     }
 
     public func hasActiveDevice(in room: HARoom) -> Bool {
         if room.id == HARoom.favorites.id {
-            return devices.contains { $0.isFavorite && $0.isOn }
+            return devices.contains { $0.isFavorite && $0.domain != .script && $0.isOn }
         }
-        return devices.contains { $0.room.id == room.id && $0.isOn }
+        return devices.contains { $0.room.id == room.id && $0.domain != .script && $0.isOn }
     }
 
     public var filteredScenes: [HASceneItem] {
@@ -125,6 +125,11 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     // MARK: - DRY State Mutation & Device Actions
 
     public func toggleDevice(_ deviceId: String) {
+        if let index = deviceIndexById[deviceId], devices[index].domain == .script {
+            // Running a script is a momentary action, never an AC state toggle.
+            dispatchService(domain: "script", service: "turn_on", payload: ["entity_id": deviceId])
+            return
+        }
         guard let updated = mutateDevice(id: deviceId, mutation: { device in
             device.isOn.toggle()
             if device.isOn && device.domain == .light && device.supportsBrightness && device.brightnessPct < 5 {
@@ -140,6 +145,35 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
             service: updated.isOn ? "turn_on" : "turn_off",
             payload: ["entity_id": updated.id]
         )
+    }
+
+    public func setClimateTemperature(_ temperature: Double, for deviceId: String) {
+        guard let updated = mutateDevice(id: deviceId, mutation: { device in
+            guard device.domain == .climate else { return }
+            let value = min(device.maxTemperature, max(device.minTemperature, temperature.rounded()))
+            device.targetTemperature = value
+        }), let target = updated.targetTemperature else { return }
+
+        dispatchService(domain: "climate", service: "set_temperature", payload: ["entity_id": deviceId, "temperature": target])
+    }
+
+    public func setClimateMode(_ mode: String, for deviceId: String) {
+        guard mutateDevice(id: deviceId, mutation: { device in
+            guard device.hvacModes.contains(mode) else { return }
+            device.hvacMode = mode
+            device.isOn = !["off", "unknown", "unavailable"].contains(mode)
+        }) != nil else { return }
+
+        dispatchService(domain: "climate", service: "set_hvac_mode", payload: ["entity_id": deviceId, "hvac_mode": mode])
+    }
+
+    public func setClimateFan(_ mode: String, for deviceId: String) {
+        guard mutateDevice(id: deviceId, mutation: { device in
+            guard device.fanModes.contains(mode) else { return }
+            device.fanMode = mode
+        }) != nil else { return }
+
+        dispatchService(domain: "climate", service: "set_fan_mode", payload: ["entity_id": deviceId, "fan_mode": mode])
     }
 
     public func setBrightness(for deviceId: String, percentage: Double) {

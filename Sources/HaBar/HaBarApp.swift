@@ -3,24 +3,24 @@ import AppKit
 import Combine
 
 @main
-public struct HaBarApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+@MainActor
+public enum HaBarApp {
+    private static var appDelegate: AppDelegate?
 
-    public init() {
+    public static func main() {
         let args = CommandLine.arguments
         if let idx = args.firstIndex(of: "--export-screenshots"), idx + 1 < args.count {
             let outDir = args[idx + 1]
-            MainActor.assumeIsolated {
-                ScreenshotExporter.exportAll(to: outDir)
-            }
+            ScreenshotExporter.exportAll(to: outDir)
             exit(0)
         }
-    }
 
-    public var body: some Scene {
-        Settings {
-            EmptyView()
-        }
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        Self.appDelegate = delegate
+        app.delegate = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
     }
 }
 
@@ -63,7 +63,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func observeStoreChanges() {
         store.$devices
             .map { devices in
-                devices.reduce(0) { $0 + ($1.isOn ? 1 : 0) }
+                devices.reduce(0) { $0 + ($1.domain != .script && $1.isOn ? 1 : 0) }
             }
             .removeDuplicates()
             .receive(on: RunLoop.main)

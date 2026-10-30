@@ -145,6 +145,22 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
     public var statusSubtitle: String?
     public var powerWatts: Int?
 
+    public var targetTemperature: Double? = nil
+    public var minTemperature: Double = 16
+    public var maxTemperature: Double = 30
+    public var hvacMode: String? = nil
+    public var hvacModes: [String] = []
+    public var fanMode: String? = nil
+    public var fanModes: [String] = []
+    public var isAssumedState: Bool = false
+
+    public static func modeTitle(_ mode: String) -> String {
+        ["off":"Desligado", "cool":"Ar frio", "heat":"Ar quente", "auto":"Auto", "fan_only":"Ventilar", "dry":"Desumidificar"][mode] ?? mode
+    }
+    public static func fanTitle(_ mode: String) -> String {
+        ["auto":"Auto", "low":"Fraco", "medium":"Médio", "high":"Forte"][mode] ?? mode
+    }
+
     public var accentColor: Color {
         guard isOn else { return Color.white.opacity(0.35) }
         switch domain {
@@ -160,6 +176,11 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
     }
 
     public var formattedStatusLine: String {
+        if domain == .climate {
+            let label = Self.modeTitle(hvacMode ?? "Sem estado")
+            return label + (isAssumedState ? " · estimado" : "")
+        }
+        if domain == .script { return isOn ? "Enviando comando…" : "Toque para enviar" }
         if let custom = statusSubtitle, domain != .light {
             return isOn ? custom : "Desligado"
         }
@@ -173,6 +194,11 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
 // MARK: - Pure Mapper for Home Assistant JSON States & Areas
 
 public enum HAEntityMapper {
+    // Only expose the two public AC actions, not internal household helper scripts.
+    private static let airConditionerCommands: [String: (name: String, icon: String)] = [
+        "script.jarvis_ar_escritorio_ligar_24": ("Ar · ligar a 24 °C", "snowflake"),
+        "script.jarvis_ar_escritorio_desligar": ("Ar · desligar", "power")
+    ]
     public static func parseAreasResponse(_ rawArray: [[String: Any]]) -> (rooms: [HARoom], entityToRoom: [String: HARoom]) {
         var rooms: [HARoom] = [.favorites]
         var entityMap: [String: HARoom] = [:]
@@ -226,6 +252,25 @@ public enum HAEntityMapper {
                         isActive: false
                     )
                 )
+            } else if entityId.hasPrefix("climate.") {
+                var climate = HADeviceItem(
+                    id: entityId, name: friendlyName, domain: .climate,
+                    room: entityToRoom[entityId] ?? inferRoom(from: "\(entityId) \(friendlyName)"),
+                    isFavorite: true, isOn: !["off", "unknown", "unavailable"].contains(stateStr),
+                    supportsBrightness: false, supportsColor: false,
+                    brightnessPct: 0, rgbColor: .climateCyan, colorTempKelvin: nil,
+                    activePresetId: nil, activeEffect: "", availableEffects: [],
+                    iconSystemName: "air.conditioner.horizontal.fill", statusSubtitle: nil, powerWatts: nil
+                )
+                climate.targetTemperature = attrs["temperature"] as? Double
+                climate.minTemperature = attrs["min_temp"] as? Double ?? 16
+                climate.maxTemperature = attrs["max_temp"] as? Double ?? 30
+                climate.hvacMode = stateStr
+                climate.hvacModes = attrs["hvac_modes"] as? [String] ?? []
+                climate.fanMode = attrs["fan_mode"] as? String
+                climate.fanModes = attrs["fan_modes"] as? [String] ?? []
+                climate.isAssumedState = attrs["assumed_state"] as? Bool ?? false
+                parsedDevices.append(climate)
             } else if entityId.hasPrefix("light.") {
                 let isOn = (stateStr == "on")
                 let colorModes = (attrs["supported_color_modes"] as? [String]) ?? []
@@ -262,6 +307,16 @@ public enum HAEntityMapper {
                         powerWatts: nil
                     )
                 )
+            } else if let command = airConditionerCommands[entityId] {
+                parsedDevices.append(HADeviceItem(
+                    id: entityId, name: command.name, domain: .script,
+                    room: entityToRoom[entityId] ?? .escritorio,
+                    isFavorite: true, isOn: stateStr == "on",
+                    supportsBrightness: false, supportsColor: false,
+                    brightnessPct: 0, rgbColor: .climateCyan, colorTempKelvin: nil,
+                    activePresetId: nil, activeEffect: "", availableEffects: [],
+                    iconSystemName: command.icon, statusSubtitle: nil, powerWatts: nil
+                ))
             } else if entityId.hasPrefix("switch.") {
                 let isOn = (stateStr == "on")
                 let room = entityToRoom[entityId] ?? inferRoom(from: "\(entityId) \(friendlyName)")
@@ -290,6 +345,9 @@ public enum HAEntityMapper {
             }
         }
 
+        if parsedDevices.contains(where: { $0.id == "climate.ar_do_escritorio" }) {
+            parsedDevices.removeAll { airConditionerCommands[$0.id] != nil }
+        }
         parsedScenes.sort { a, b in
             a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
@@ -308,7 +366,13 @@ public enum HAEntityMapper {
     public static func applyStateUpdate(_ stateObj: [String: Any], to item: inout HADeviceItem) {
         guard let stateStr = stateObj["state"] as? String else { return }
         let attrs = stateObj["attributes"] as? [String: Any] ?? [:]
-        item.isOn = (stateStr == "on" || (item.domain == .climate && stateStr != "off"))
+        item.isOn = (stateStr == "on" || (item.domain == .climate && !["off", "unknown", "unavailable"].contains(stateStr)))
+        if item.domain == .climate {
+            item.hvacMode = stateStr
+            item.targetTemperature = attrs["temperature"] as? Double
+            item.fanMode = attrs["fan_mode"] as? String
+            item.isAssumedState = attrs["assumed_state"] as? Bool ?? false
+        }
         if let rawBrightness = attrs["brightness"] as? Double {
             item.brightnessPct = min(100, max(0, (rawBrightness / 255.0) * 100.0))
         }

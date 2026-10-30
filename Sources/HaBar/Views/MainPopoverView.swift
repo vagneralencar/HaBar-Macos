@@ -279,7 +279,7 @@ public struct MainPopoverView: View {
                                 }
                             },
                             onOpenDetail: {
-                                if device.domain == .light && device.supportsColor {
+                                if (device.domain == .light && device.supportsColor) || device.domain == .climate {
                                     withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
                                         store.selectedDeviceForDetail = device
                                     }
@@ -506,7 +506,7 @@ private struct DeviceControlCard: View {
                             .foregroundColor(device.isOn ? accent : .white.opacity(0.35))
                     }
                     .buttonStyle(.plain)
-                } else if device.domain == .light && device.supportsColor {
+                } else if (device.domain == .light && device.supportsColor) || device.domain == .climate {
                     Button(action: onOpenDetail) {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .semibold))

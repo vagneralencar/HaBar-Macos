@@ -13,6 +13,7 @@ let package = Package(
         .executableTarget(
             name: "HaBar",
             path: "Sources/HaBar"
-        )
+        ),
+        .testTarget(name: "HaBarTests", dependencies: ["HaBar"])
     ]
 )
