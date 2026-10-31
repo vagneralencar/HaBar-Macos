@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import Network
 
 @main
 @MainActor
@@ -31,12 +32,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = HomeAssistantStore()
     private var cancellables = Set<AnyCancellable>()
     private var eventMonitor: Any?
+    private var globalKeyMonitor: Any?
+    private var localKeyMonitor: Any?
+    private let networkMonitor = NWPathMonitor()
+    private let networkQueue = DispatchQueue(label: "habar.network.monitor")
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         setupPopover()
         setupStatusItem()
         observeStoreChanges()
         setupOutsideClickMonitor()
+        setupGlobalHotkey()
+        setupSleepWakeObserver()
+        setupNetworkMonitoring()
+
+        if store.autoCheckUpdates {
+            Task {
+                await store.checkForUpdates(userInitiated: false)
+            }
+        }
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        networkMonitor.cancel()
+        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
     }
 
     private func setupPopover() {
@@ -56,7 +77,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.imagePosition = .imageLeading
         button.target = self
-        button.action = #selector(togglePopover(_:))
+        button.action = #selector(handleStatusItemClick(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         updateStatusButtonLabel(activeCount: store.activeLightsCount)
     }
 
@@ -88,15 +110,87 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePopover(_ sender: AnyObject?) {
+    @objc private func handleStatusItemClick(_ sender: AnyObject?) {
         guard let button = statusItem.button else { return }
+        let event = NSApp.currentEvent
+
+        if event?.type == .rightMouseUp {
+            showContextMenu(for: button)
+            return
+        }
+
+        togglePopover(sender)
+    }
+
+    @objc private func togglePopover(_ sender: AnyObject?) {
+        guard statusItem.button != nil else { return }
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            showPopover()
         }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem.button else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    private func showContextMenu(for view: NSView) {
+        let menu = NSMenu()
+
+        let headerItem = NSMenuItem(title: "HaBar v\(AppInfo.version)", action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
+        menu.addItem(headerItem)
+        menu.addItem(NSMenuItem.separator())
+
+        let turnOffItem = NSMenuItem(title: "Apagar Tudo", action: #selector(contextTurnOffAll), keyEquivalent: "")
+        turnOffItem.target = self
+        turnOffItem.isEnabled = store.activeLightsCount > 0
+        menu.addItem(turnOffItem)
+
+        let syncItem = NSMenuItem(title: "Sincronizar Agora", action: #selector(contextSyncNow), keyEquivalent: "")
+        syncItem.target = self
+        menu.addItem(syncItem)
+
+        let settingsItem = NSMenuItem(title: "Ajustes...", action: #selector(contextOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let browserItem = NSMenuItem(title: "Abrir no Navegador", action: #selector(contextOpenBrowser), keyEquivalent: "")
+        browserItem.target = self
+        menu.addItem(browserItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let quitItem = NSMenuItem(title: "Encerrar HaBar", action: #selector(contextQuit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height), in: view)
+    }
+
+    @objc private func contextTurnOffAll() {
+        store.turnOffAllLights()
+    }
+
+    @objc private func contextSyncNow() {
+        store.connectToHomeAssistant()
+    }
+
+    @objc private func contextOpenSettings() {
+        store.isShowingSettings = true
+        showPopover()
+    }
+
+    @objc private func contextOpenBrowser() {
+        store.openHomeAssistantInBrowser()
+    }
+
+    @objc private func contextQuit() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func setupOutsideClickMonitor() {
@@ -104,6 +198,52 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.popover.isShown else { return }
             self.popover.performClose(nil)
         }
+    }
+
+    private func setupGlobalHotkey() {
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleHotkeyEvent(event)
+        }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if self?.handleHotkeyEvent(event) == true {
+                return nil
+            }
+            return event
+        }
+    }
+
+    @discardableResult
+    private func handleHotkeyEvent(_ event: NSEvent) -> Bool {
+        guard store.hotKeyEnabled else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == [.command, .option] && event.charactersIgnoringModifiers?.lowercased() == "h" {
+            togglePopover(nil)
+            return true
+        }
+        return false
+    }
+
+    private func setupSleepWakeObserver() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleWakeNotification),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleWakeNotification(_ notification: Notification) {
+        store.resyncAfterWake()
+    }
+
+    private func setupNetworkMonitoring() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor [weak self] in
+                self?.store.networkDidBecomeAvailable()
+            }
+        }
+        networkMonitor.start(queue: networkQueue)
     }
 }
 

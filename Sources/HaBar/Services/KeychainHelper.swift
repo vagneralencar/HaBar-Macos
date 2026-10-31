@@ -8,10 +8,17 @@ public enum KeychainHelper {
     private static let tokenDefaultsKey = "habar_ha_token_backup"
     private static let useDemoModeKey = "habar_ha_demo_mode"
 
+    /// Unit tests point the config file at a temporary directory and skip Keychain / UserDefaults.
+    public static var configDirectoryOverride: URL?
+    public static var isIsolatedForTesting = false
+
     private static var configFileURL: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".config/habar/config.json")
+        let directory = configDirectoryOverride
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/habar")
+        return directory.appendingPathComponent("config.json")
     }
+
+    // MARK: - Server URL
 
     public static var serverURLString: String {
         get {
@@ -20,17 +27,21 @@ public enum KeychainHelper {
                !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return url.trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            let saved = UserDefaults.standard.string(forKey: serverURLKey) ?? ""
+            let saved = isIsolatedForTesting ? "" : (UserDefaults.standard.string(forKey: serverURLKey) ?? "")
             return saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "http://homeassistant.local:8123"
                 : saved
         }
         set {
             let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            UserDefaults.standard.set(clean, forKey: serverURLKey)
+            if !isIsolatedForTesting {
+                UserDefaults.standard.set(clean, forKey: serverURLKey)
+            }
             writeConfigFile(serverURL: clean, token: loadToken())
         }
     }
+
+    // MARK: - Optional advanced settings (config.json only)
 
     public static var fallbackURLString: String? {
         guard let fileCfg = readConfigFile(),
@@ -58,22 +69,54 @@ public enum KeychainHelper {
         return []
     }
 
+    /// Optional user-defined momentary scripts (e.g. IR remote commands) shown as buttons.
+    /// ```json
+    /// "script_commands": [
+    ///   { "entity_id": "script.ac_on", "name": "AC on", "icon": "snowflake", "room": "office" }
+    /// ]
+    /// ```
+    public static let defaultScriptCommands: [ScriptCommand] = [
+        ScriptCommand(entityId: "script.jarvis_ar_escritorio_ligar_24", name: "Ar · ligar a 24 °C", icon: "snowflake", roomId: "escritorio"),
+        ScriptCommand(entityId: "script.jarvis_ar_escritorio_desligar", name: "Ar · desligar", icon: "power", roomId: "escritorio")
+    ]
+
+    public static var scriptCommands: [ScriptCommand] {
+        if let fileCfg = readConfigFile(),
+           let raw = fileCfg["script_commands"] as? [[String: Any]] {
+            return raw.compactMap { entry in
+                guard let entityId = entry["entity_id"] as? String, entityId.hasPrefix("script.") else { return nil }
+                return ScriptCommand(
+                    entityId: entityId,
+                    name: (entry["name"] as? String) ?? entityId,
+                    icon: (entry["icon"] as? String) ?? "play.fill",
+                    roomId: entry["room"] as? String
+                )
+            }
+        }
+        return defaultScriptCommands
+    }
+
     public static var isDemoModePreferred: Bool {
         get {
-            if UserDefaults.standard.object(forKey: useDemoModeKey) == nil {
+            if isIsolatedForTesting || UserDefaults.standard.object(forKey: useDemoModeKey) == nil {
                 return false
             }
             return UserDefaults.standard.bool(forKey: useDemoModeKey)
         }
         set {
+            guard !isIsolatedForTesting else { return }
             UserDefaults.standard.set(newValue, forKey: useDemoModeKey)
         }
     }
 
+    // MARK: - Token
+
     public static func saveToken(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(trimmed, forKey: tokenDefaultsKey)
         writeConfigFile(serverURL: serverURLString, token: trimmed)
+        guard !isIsolatedForTesting else { return }
+
+        UserDefaults.standard.set(trimmed, forKey: tokenDefaultsKey)
 
         guard let data = trimmed.data(using: .utf8) else { return }
         let query: [String: Any] = [
@@ -96,6 +139,7 @@ public enum KeychainHelper {
            !fileToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return fileToken.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        guard !isIsolatedForTesting else { return "" }
 
         if let defaultsToken = UserDefaults.standard.string(forKey: tokenDefaultsKey),
            !defaultsToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -120,7 +164,10 @@ public enum KeychainHelper {
         return token.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - Config file
+
     private static func readConfigFile() -> [String: Any]? {
+        if isIsolatedForTesting && configDirectoryOverride == nil { return nil }
         guard let data = try? Data(contentsOf: configFileURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -130,7 +177,11 @@ public enum KeychainHelper {
 
     private static func writeConfigFile(serverURL: String, token: String) {
         let dir = configFileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
         var payload = readConfigFile() ?? [:]
         payload["server_url"] = serverURL
         payload["token"] = token

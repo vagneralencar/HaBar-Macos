@@ -6,8 +6,9 @@ DerivedData/
 *.xcworkspace
 xcuserdata/
 
-# Built App Bundles
+# Built App Bundles & Release Archives
 *.app/
+*.zip
 
 # macOS System Files
 .DS_Store

@@ -46,6 +46,101 @@ public struct MainPopoverView: View {
                     .padding(16)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
+
+            // Toast overlay
+            if let toast = store.toast {
+                VStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundColor(toast.isError ? AppTheme.dangerRed : AppTheme.greenOnline)
+                        Text(toast.text)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.black.opacity(0.88))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(toast.isError ? AppTheme.dangerRed.opacity(0.6) : AppTheme.greenOnline.opacity(0.6), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 3)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+
+                    Spacer()
+                }
+                .zIndex(200)
+            }
+
+            // Confirmation Modal overlay
+            if let confirmation = store.pendingConfirmation {
+                ZStack {
+                    Color.black.opacity(0.60)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation { store.pendingConfirmation = nil }
+                        }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(AppTheme.amberAccent)
+                            Text(confirmation.title)
+                                .font(.system(size: 13.5, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+
+                        Text(confirmation.message)
+                            .font(.system(size: 11.5, weight: .regular))
+                            .foregroundColor(.white.opacity(0.82))
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: 10) {
+                            Button {
+                                withAnimation { store.pendingConfirmation = nil }
+                            } label: {
+                                Text("Cancelar")
+                                    .font(.system(size: 11.5, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 7)
+                                    .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.08), borderColor: Color.white.opacity(0.12))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                let act = confirmation.action
+                                withAnimation { store.pendingConfirmation = nil }
+                                act()
+                            } label: {
+                                Text(confirmation.confirmTitle)
+                                    .font(.system(size: 11.5, weight: .bold))
+                                    .foregroundColor(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(AppTheme.amberAccent)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(14)
+                    .frame(width: 310)
+                    .glassCard(cornerRadius: 14, fill: Color(red: 0.14, green: 0.14, blue: 0.16), borderColor: Color.white.opacity(0.20), lineWidth: 1.2)
+                    .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 12)
+                }
+                .transition(.opacity)
+                .zIndex(300)
+            }
         }
         .frame(width: AppTheme.popoverWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -57,6 +152,10 @@ public struct MainPopoverView: View {
     private var dashboardContent: some View {
         VStack(alignment: .leading, spacing: 13) {
             headerSection
+
+            if let update = store.availableUpdate {
+                updateBanner(update)
+            }
 
             if store.isSearchVisible {
                 searchFieldSection
@@ -138,6 +237,28 @@ public struct MainPopoverView: View {
                 }
             }
         }
+    }
+
+    private func updateBanner(_ update: ReleaseInfo) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .foregroundColor(AppTheme.amberAccent)
+            Text("Atualização \(update.version) disponível!")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.95))
+            Spacer()
+            Button {
+                NSWorkspace.shared.open(update.url)
+            } label: {
+                Text("Ver ↗")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(AppTheme.amberAccent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassCard(cornerRadius: 8, fill: AppTheme.amberAccent.opacity(0.15), borderColor: AppTheme.amberAccent.opacity(0.35))
     }
 
     private var searchFieldSection: some View {
@@ -230,12 +351,16 @@ public struct MainPopoverView: View {
                 RoomPillButton(
                     room: room,
                     isSelected: store.selectedRoom.id == room.id,
-                    hasActive: store.hasActiveDevice(in: room)
-                ) {
-                    withAnimation(.easeInOut(duration: 0.16)) {
-                        store.selectedRoom = room
+                    hasActive: store.hasActiveDevice(in: room),
+                    action: {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            store.selectedRoom = room
+                        }
+                    },
+                    onSetRoomPower: { turnOn in
+                        store.setRoomPower(room, on: turnOn)
                     }
-                }
+                )
             }
         }
     }
@@ -258,7 +383,20 @@ public struct MainPopoverView: View {
                     .foregroundColor(.white.opacity(0.45))
             }
 
-            if items.isEmpty {
+            if store.isLoading && items.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 6)
+                    Text("Carregando dispositivos…")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                }
+                .padding(.vertical, 22)
+                .glassCard()
+            } else if items.isEmpty {
                 HStack {
                     Spacer()
                     Text("Nenhum dispositivo neste cômodo")
@@ -273,9 +411,10 @@ public struct MainPopoverView: View {
                     ForEach(items) { device in
                         DeviceControlCard(
                             device: device,
+                            serverURLString: store.serverURLString,
                             onToggle: {
                                 withAnimation(.easeInOut(duration: 0.18)) {
-                                    store.toggleDevice(device.id)
+                                    store.requestToggle(device)
                                 }
                             },
                             onOpenDetail: {
@@ -285,12 +424,17 @@ public struct MainPopoverView: View {
                                     }
                                 } else {
                                     withAnimation(.easeInOut(duration: 0.18)) {
-                                        store.toggleDevice(device.id)
+                                        store.requestToggle(device)
                                     }
                                 }
                             },
                             onBrightnessChange: { newPct in
                                 store.setBrightness(for: device.id, percentage: newPct)
+                            },
+                            onToggleFavorite: {
+                                withAnimation {
+                                    store.toggleFavorite(device.id)
+                                }
                             }
                         )
                     }
@@ -330,6 +474,7 @@ private struct RoomPillButton: View {
     let isSelected: Bool
     let hasActive: Bool
     let action: () -> Void
+    let onSetRoomPower: (Bool) -> Void
 
     @State private var isHovered: Bool = false
 
@@ -374,6 +519,19 @@ private struct RoomPillButton: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                onSetRoomPower(true)
+            } label: {
+                Label("Ligar tudo em \(room.name)", systemImage: "lightbulb.fill")
+            }
+
+            Button {
+                onSetRoomPower(false)
+            } label: {
+                Label("Desligar tudo em \(room.name)", systemImage: "lightbulb.slash")
+            }
+        }
         .onHover { hovering in
             isHovered = hovering
         }
@@ -456,9 +614,11 @@ private struct ScenePillCard: View {
 
 private struct DeviceControlCard: View {
     let device: HADeviceItem
+    let serverURLString: String
     let onToggle: () -> Void
     let onOpenDetail: () -> Void
     let onBrightnessChange: (Double) -> Void
+    let onToggleFavorite: () -> Void
 
     @State private var isHovered: Bool = false
 
@@ -480,6 +640,7 @@ private struct DeviceControlCard: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(device.isReadOnly)
 
                 Button(action: onOpenDetail) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -504,6 +665,13 @@ private struct DeviceControlCard: View {
                         Image(systemName: "power.circle.fill")
                             .font(.system(size: 16))
                             .foregroundColor(device.isOn ? accent : .white.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                } else if device.domain == .lock {
+                    Button(action: onToggle) {
+                        Image(systemName: device.isOn ? "lock.open.fill" : "lock.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(device.isOn ? AppTheme.amberAccent : AppTheme.greenOnline)
                     }
                     .buttonStyle(.plain)
                 } else if (device.domain == .light && device.supportsColor) || device.domain == .climate {
@@ -537,6 +705,32 @@ private struct DeviceControlCard: View {
             borderColor: device.isOn ? accent.opacity(0.42) : Color.white.opacity(0.09),
             lineWidth: 1.1
         )
+        .contextMenu {
+            if !device.isReadOnly {
+                Button {
+                    onToggle()
+                } label: {
+                    Label(device.isOn ? "Desligar" : "Ligar", systemImage: "power")
+                }
+            }
+
+            Button {
+                onToggleFavorite()
+            } label: {
+                Label(
+                    device.isFavorite ? "Remover dos Favoritos" : "Adicionar aos Favoritos",
+                    systemImage: device.isFavorite ? "star.slash" : "star.fill"
+                )
+            }
+
+            if let url = URL(string: "\(serverURLString)/config/entities") {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("Ver no Home Assistant", systemImage: "arrow.up.right.square")
+                }
+            }
+        }
         .onHover { hovering in
             isHovered = hovering
         }

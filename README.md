@@ -23,14 +23,19 @@
 
 - **Native macOS Vibrancy UI (`NSVisualEffectView`)**: Dark frosted-glass popover matching macOS Sequoia / Control Center.
 - **Dynamic Room & Area Discovery**: Automatically fetches your real rooms (`areas()`) and entity assignments from Home Assistant.
-- **Zero-Scroll Room Pill Grid**: All rooms are visible at a glance with active-light indicator dots.
-- **Quick Scenes (`scene.*`)**: Instant activation of Home Assistant scenes with expandable view.
-- **Tactile Inline Brightness Sliders**: Drag directly on light cards to dim/brighten with 120ms network debounce for 120Hz UI smoothness.
+- **Zero-Scroll Room Pill Grid**: All rooms are visible at a glance with active-light indicator dots. Right-click or double-click to toggle room-wide power.
+- **Quick Scenes (`scene.*`)**: Instant activation of Home Assistant scenes with active timestamp state detection.
+- **Multi-Device Support**: Controls Lights, Climate (AC thermostat with target temp & fan modes), Covers/Blinds, Fans, Locks (with safety confirmation dialog), Switches, and Sensors.
+- **Tactile Inline Brightness Sliders**: Drag directly on light cards to dim/brighten with live floating percentage tooltip and 120ms network debounce for 120Hz UI smoothness.
 - **Detailed Light Inspector**:
   - Interactive semi-circular **RGB & Color Temperature (Kelvin)** spectrum dome.
   - 1-click presets (*Warm White 2700K*, *Daylight 5000K*, *Sunset*, *Cyberpunk*, *Ocean*).
   - Dynamic **Effects** selector (`effect_list`).
-- **Real-Time WebSocket Sync**: Subscribes to `state_changed` events via `/api/websocket` + REST fallback.
+- **Global Hotkey (`⌥⌘H`)**: Instant toggle from anywhere on macOS.
+- **Contextual Menu Bar Access**: Right-click the menu bar icon for quick actions ("Apagar Tudo", "Sincronizar Agora", "Ajustes...", "Encerrar").
+- **Sleep & Network Resilience**: Reconnects on Mac wake (`didWakeNotification`), monitors connection changes (`NWPathMonitor`), and uses exponential backoff.
+- **Update Checker**: Automatic and on-demand check for new releases directly from GitHub.
+- **Real-Time WebSocket Sync**: Subscribes to `state_changed` events via `/api/websocket` with REST fallback and optimistic UI updates with automatic rollback on failure.
 
 ---
 

@@ -7,6 +7,8 @@ public struct TactileSlider: View {
     public var showPercentageInside: Bool = false
     public var onChanged: (Double) -> Void
 
+    @State private var isDragging: Bool = false
+
     public init(
         percentage: Binding<Double>,
         fillColor: Color,
@@ -71,16 +73,38 @@ public struct TactileSlider: View {
                     .font(.system(size: showPercentageInside ? 13 : 10, weight: .semibold))
                     .foregroundColor(clamped > 12 ? Color.black.opacity(0.65) : Color.white.opacity(0.5))
                     .padding(.leading, showPercentageInside ? 12 : 7)
+
+                // Floating live percentage tooltip when dragging compact slider
+                if isDragging && !showPercentageInside {
+                    Text("\(Int(clamped.rounded()))%")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color.black.opacity(0.85))
+                                .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.8))
+                        )
+                        .offset(x: max(0, min(width - 34, fillWidth - 17)), y: -height - 2)
+                        .transition(.opacity)
+                }
             }
             .frame(height: height)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        isDragging = true
                         let ratio = min(1.0, max(0.0, value.location.x / width))
                         let newPct = Double(ratio * 100.0)
                         percentage = newPct
                         onChanged(newPct)
+                    }
+                    .onEnded { _ in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            isDragging = false
+                        }
                     }
             )
         }
