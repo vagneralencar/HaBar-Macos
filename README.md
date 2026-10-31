@@ -31,6 +31,12 @@
   - Interactive semi-circular **RGB & Color Temperature (Kelvin)** spectrum dome.
   - 1-click presets (*Warm White 2700K*, *Daylight 5000K*, *Sunset*, *Cyberpunk*, *Ocean*).
   - Dynamic **Effects** selector (`effect_list`).
+- **High-Performance Event Batching**: Micro-buffer aggregation (35ms coalescing) for WebSocket `state_changed` bursts, eliminating UI thread jitter during scene triggers.
+- **Customizable Menu Bar Metrics**: Choose to show Active Lights count (`🏠 3`), Real-Time Power in Watts (`🏠 350W`), Sensor Temperature (`🏠 24°C`), Combined (`🏠 3 • 350W`), or Icon only (`🏠`).
+- **Touch ID & Biometric Protection**: Hardware authentication via `LocalAuthentication` for opening doors, unlocking physical access, and sensitive controls.
+- **Audit Logging**: Lightweight local action history (`~/.config/habar/audit.json`) tracking the last 50 executed commands with timestamps and biometric verification markers.
+- **Spotlight Command Palette**: Natural commands in search (`sala 50`, `apagar tudo`, scene names) with 1-press `Enter ↵` execution.
+- **Keyboard Room Jump**: Switch rooms with number keys `1`–`9` directly on the dashboard.
 - **Global Hotkey (`⌥⌘H`)**: Instant toggle from anywhere on macOS.
 - **Contextual Menu Bar Access**: Right-click the menu bar icon for quick actions ("Apagar Tudo", "Sincronizar Agora", "Ajustes...", "Encerrar").
 - **Sleep & Network Resilience**: Reconnects on Mac wake (`didWakeNotification`), monitors connection changes (`NWPathMonitor`), and uses exponential backoff.
@@ -61,6 +67,8 @@ Sources/HaBar/
 │   └── HAEntity.swift               # Value-type models (RGBColor, HARoom, HADeviceItem) & HAEntityMapper
 ├── Services/
 │   ├── AppUpdater.swift             # 1-Click in-app download, staging, quarantine strip & relaunch
+│   ├── AuditLogger.swift            # Circular JSON audit trail for recent actions
+│   ├── BiometricAuthHelper.swift    # macOS LocalAuthentication (Touch ID / Apple Watch) bridge
 │   ├── BonjourDiscovery.swift       # ZeroConf mDNS discovery for local HA (_home-assistant._tcp)
 │   ├── HomeAssistantClient.swift    # Decoupled REST + WebSocket client
 │   ├── HomeAssistantStore.swift     # @MainActor reactive store with O(1) entity lookup

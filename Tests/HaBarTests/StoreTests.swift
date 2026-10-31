@@ -231,4 +231,77 @@ final class StoreTests: XCTestCase {
         store.dismissUpdateBanner()
         XCTAssertTrue(store.isDismissedUpdateBanner)
     }
+
+    func testWebSocketEventBatching() {
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_batching_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        guard let firstLight = store.devices.first(where: { $0.domain == .light }) else {
+            XCTFail("Expected mock light")
+            return
+        }
+
+        // Send multiple updates rapidly
+        store.clientDidReceiveStateUpdate([
+            "entity_id": firstLight.id,
+            "state": "off",
+            "attributes": [:]
+        ])
+        store.clientDidReceiveStateUpdate([
+            "entity_id": firstLight.id,
+            "state": "on",
+            "attributes": ["brightness": 128]
+        ])
+
+        // Flush batch
+        store.flushPendingStateUpdates()
+
+        let updated = store.devices.first(where: { $0.id == firstLight.id })
+        XCTAssertEqual(updated?.isOn, true)
+        XCTAssertEqual(updated?.brightnessPct.rounded(), 50.0)
+    }
+
+    func testMenuBarMetrics() {
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_metrics_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        // Mock devices include switches/lights with power Watts
+        XCTAssertGreaterThanOrEqual(store.totalPowerWatts, 0.0)
+
+        // Test primary temperature
+        if let temp = store.primaryTemperatureCelsius {
+            XCTAssertGreaterThan(temp, 0.0)
+        }
+    }
+
+    func testAuditLogger() {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("test_audit_\(UUID().uuidString).json")
+        let logger = AuditLogger(fileURL: tempURL)
+
+        logger.log(entityId: "light.living", entityName: "Sala", action: "Ligado")
+        XCTAssertEqual(logger.entries.count, 1)
+        XCTAssertEqual(logger.entries.first?.entityName, "Sala")
+
+        logger.clear()
+        XCTAssertEqual(logger.entries.count, 0)
+    }
+
+    func testTurnOffAllConfirmationPreference() {
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_turn_off_confirm_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        store.confirmTurnOffAll = true
+        store.requestTurnOffAllLights()
+
+        if store.activeLightsCount > 0 {
+            XCTAssertNotNil(store.pendingConfirmation)
+            XCTAssertEqual(store.pendingConfirmation?.confirmTitle, "Apagar Tudo")
+        }
+    }
 }

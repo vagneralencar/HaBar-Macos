@@ -113,6 +113,16 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     @Published public var defaultOpeningRoomId: String {
         didSet { defaults.set(defaultOpeningRoomId, forKey: Keys.defaultOpeningRoomId) }
     }
+    @Published public var menuBarDisplayMode: MenuBarDisplayMode {
+        didSet { defaults.set(menuBarDisplayMode.rawValue, forKey: Keys.menuBarDisplayMode) }
+    }
+    @Published public var requireBiometricsForSensitiveActions: Bool {
+        didSet { defaults.set(requireBiometricsForSensitiveActions, forKey: Keys.requireBiometricsForSensitiveActions) }
+    }
+    @Published public var confirmTurnOffAll: Bool {
+        didSet { defaults.set(confirmTurnOffAll, forKey: Keys.confirmTurnOffAll) }
+    }
+    @Published public private(set) var isPopoverPresented: Bool = false
 
     public let isScreenshotPreview: Bool
 
@@ -125,6 +135,9 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         static let themeMode = "habar.themeMode"
         static let language = "habar.language"
         static let defaultOpeningRoomId = "habar.defaultOpeningRoomId"
+        static let menuBarDisplayMode = "habar.menuBarDisplayMode"
+        static let requireBiometricsForSensitiveActions = "habar.requireBiometrics"
+        static let confirmTurnOffAll = "habar.confirmTurnOffAll"
     }
 
     private let client: HomeAssistantAPI
@@ -168,6 +181,11 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         let savedDefaultRoom = defaults.string(forKey: Keys.defaultOpeningRoomId) ?? HARoom.favorites.id
         self.defaultOpeningRoomId = savedDefaultRoom
 
+        let savedDisplayMode = defaults.string(forKey: Keys.menuBarDisplayMode).flatMap(MenuBarDisplayMode.init) ?? .activeLights
+        self.menuBarDisplayMode = savedDisplayMode
+        self.requireBiometricsForSensitiveActions = defaults.object(forKey: Keys.requireBiometricsForSensitiveActions) as? Bool ?? true
+        self.confirmTurnOffAll = defaults.bool(forKey: Keys.confirmTurnOffAll)
+
         let savedURL = KeychainHelper.serverURLString
         let savedToken = KeychainHelper.loadToken()
         self.serverURLString = savedURL
@@ -204,6 +222,9 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         self.themeMode = .dark
         self.language = .pt
         self.defaultOpeningRoomId = HARoom.favorites.id
+        self.menuBarDisplayMode = .activeLights
+        self.requireBiometricsForSensitiveActions = false
+        self.confirmTurnOffAll = false
         self.serverURLString = "http://homeassistant.local:8123"
         self.accessToken = ""
         self.connectionStatus = .connected(host: "homeassistant.local")
@@ -231,6 +252,32 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
 
     public var activeLightsCount: Int {
         devices.reduce(0) { $0 + ($1.domain.countsAsActive && $1.isOn ? 1 : 0) }
+    }
+
+    public var totalPowerWatts: Double {
+        devices.reduce(0.0) { sum, dev in
+            guard dev.isOn, let w = dev.powerWatts else { return sum }
+            return sum + Double(w)
+        }
+    }
+
+    public var primaryTemperatureCelsius: Double? {
+        for dev in devices where dev.domain == .sensor {
+            if dev.deviceClass == "temperature", let subtitle = dev.statusSubtitle {
+                let cleaned = subtitle.split(separator: " ").first ?? ""
+                if let temp = Double(cleaned.replacingOccurrences(of: ",", with: ".")) {
+                    return temp
+                }
+            }
+        }
+        return nil
+    }
+
+    public func setPopoverPresented(_ presented: Bool) {
+        isPopoverPresented = presented
+        if !presented {
+            selectedDeviceForDetail = nil
+        }
     }
 
     public func hasActiveDevice(in room: HARoom) -> Bool {
@@ -261,14 +308,46 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     /// Entry point for UI taps: asks for confirmation before safety-sensitive actions (unlocking).
     public func requestToggle(_ device: HADeviceItem) {
         if device.domain == .lock && !device.isOn {
+            if requireBiometricsForSensitiveActions && BiometricAuthHelper.isBiometricsAvailable {
+                Task { @MainActor [weak self] in
+                    let success = await BiometricAuthHelper.authenticate(
+                        reason: L10n.t("Autentique para destrancar \(device.name)", "Authenticate to unlock \(device.name)")
+                    )
+                    if success {
+                        AuditLogger.shared.log(
+                            entityId: device.id,
+                            entityName: device.name,
+                            action: L10n.t("Destrancado (Biometria)", "Unlocked (Biometric)"),
+                            wasBiometric: true
+                        )
+                        self?.toggleDevice(device.id)
+                    } else {
+                        self?.showToast(L10n.t("Autenticação biométrica cancelada.", "Biometric authentication cancelled."), isError: true)
+                    }
+                }
+                return
+            }
+
             pendingConfirmation = ConfirmationRequest(
                 title: L10n.t("Destrancar \(device.name)?", "Unlock \(device.name)?"),
                 message: L10n.t("Isso destrancará a fechadura.", "This will unlock the door."),
                 confirmTitle: L10n.t("Destrancar", "Unlock"),
-                action: { [weak self] in self?.toggleDevice(device.id) }
+                action: { [weak self] in
+                    AuditLogger.shared.log(
+                        entityId: device.id,
+                        entityName: device.name,
+                        action: L10n.t("Destrancado", "Unlocked")
+                    )
+                    self?.toggleDevice(device.id)
+                }
             )
             return
         }
+        AuditLogger.shared.log(
+            entityId: device.id,
+            entityName: device.name,
+            action: device.isOn ? L10n.t("Desligado", "Turned Off") : L10n.t("Ligado", "Turned On")
+        )
         toggleDevice(device.id)
     }
 
@@ -421,6 +500,21 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
                 self.setActiveScene(nil)
             }
         }
+    }
+
+    public func requestTurnOffAllLights() {
+        if confirmTurnOffAll && activeLightsCount > 0 {
+            pendingConfirmation = ConfirmationRequest(
+                title: L10n.t("Apagar Todas as Luzes?", "Turn Off All Lights?"),
+                message: L10n.t("Isso desligará todas as \(activeLightsCount) lâmpadas conectadas.", "This will switch off all \(activeLightsCount) active lights."),
+                confirmTitle: L10n.t("Apagar Tudo", "Turn Off All"),
+                action: { [weak self] in
+                    self?.turnOffAllLights()
+                }
+            )
+            return
+        }
+        turnOffAllLights()
     }
 
     public func turnOffAllLights() {
@@ -619,15 +713,45 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         scheduleReconnect()
     }
 
-    public func clientDidReceiveStateUpdate(_ stateObject: [String: Any]) {
-        guard let entityId = stateObject["entity_id"] as? String else { return }
+    private var pendingStateUpdates: [[String: Any]] = []
+    private var batchFlushTask: Task<Void, Never>?
 
-        if entityId.hasPrefix("scene.") {
-            handleSceneStateUpdate(entityId: entityId, stateObject: stateObject)
-            return
+    public func clientDidReceiveStateUpdate(_ stateObject: [String: Any]) {
+        pendingStateUpdates.append(stateObject)
+        if pendingStateUpdates.count >= 40 {
+            flushPendingStateUpdates()
+        } else if batchFlushTask == nil {
+            batchFlushTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 35_000_000)
+                guard !Task.isCancelled else { return }
+                self?.flushPendingStateUpdates()
+            }
         }
-        guard applyRemoteUpdate(stateObject, entityId: entityId) else { return }
-        invalidateActiveSceneIfNeeded(changedEntityId: entityId)
+    }
+
+    public func flushPendingStateUpdates() {
+        batchFlushTask?.cancel()
+        batchFlushTask = nil
+        guard !pendingStateUpdates.isEmpty else { return }
+
+        let updates = pendingStateUpdates
+        pendingStateUpdates.removeAll()
+
+        var lastStateByEntity: [String: [String: Any]] = [:]
+        for update in updates {
+            guard let entityId = update["entity_id"] as? String else { continue }
+            if entityId.hasPrefix("scene.") {
+                handleSceneStateUpdate(entityId: entityId, stateObject: update)
+            } else {
+                lastStateByEntity[entityId] = update
+            }
+        }
+
+        for (entityId, stateObject) in lastStateByEntity {
+            if applyRemoteUpdate(stateObject, entityId: entityId) {
+                invalidateActiveSceneIfNeeded(changedEntityId: entityId)
+            }
+        }
     }
 
     // MARK: - Sync internals

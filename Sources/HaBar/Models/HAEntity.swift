@@ -35,6 +35,24 @@ public struct RGBColor: Equatable, Hashable, Sendable, Codable {
     public static let switchGreen = RGBColor(48, 209, 88)
 }
 
+public enum MenuBarDisplayMode: String, Codable, CaseIterable, Sendable {
+    case activeLights = "lights"
+    case totalPower = "power"
+    case primaryTemperature = "temp"
+    case lightsAndPower = "both"
+    case iconOnly = "icon"
+
+    public var title: String {
+        switch self {
+        case .activeLights: return L10n.t("Luzes Ativas (ex: 🏠 3)", "Active Lights (e.g. 🏠 3)")
+        case .totalPower: return L10n.t("Potência Consumida (ex: 🏠 350W)", "Power Consumption (e.g. 🏠 350W)")
+        case .primaryTemperature: return L10n.t("Temperatura do Sensor (ex: 🏠 24°C)", "Sensor Temperature (e.g. 🏠 24°C)")
+        case .lightsAndPower: return L10n.t("Luzes & Potência (ex: 🏠 3 • 350W)", "Lights & Power (e.g. 🏠 3 • 350W)")
+        case .iconOnly: return L10n.t("Apenas Ícone (🏠)", "Icon Only (🏠)")
+        }
+    }
+}
+
 public enum HADomain: String, Codable, CaseIterable, Sendable {
     case light
     case scene

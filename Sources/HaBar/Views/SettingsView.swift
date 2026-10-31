@@ -5,6 +5,7 @@ public struct SettingsView: View {
     @ObservedObject public var store: HomeAssistantStore
     @ObservedObject private var launchManager = LaunchAtLoginManager.shared
     @ObservedObject private var bonjour = BonjourDiscovery.shared
+    @ObservedObject private var auditLogger = AuditLogger.shared
 
     @State private var urlInput: String = ""
     @State private var tokenInput: String = ""
@@ -14,6 +15,7 @@ public struct SettingsView: View {
     @State private var testResult: ConnectionTestResult? = nil
     @State private var isCheckingUpdates: Bool = false
     @State private var copiedBrew: Bool = false
+    @State private var isShowingAuditLog: Bool = false
 
     public init(store: HomeAssistantStore) {
         self.store = store
@@ -234,9 +236,22 @@ public struct SettingsView: View {
                     .frame(width: 195)
                 }
 
+                HStack {
+                    Text(L10n.t("Barra de menus", "Menu bar display"))
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Picker("", selection: $store.menuBarDisplayMode) {
+                        ForEach(MenuBarDisplayMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .frame(width: 195)
+                }
+
                 Toggle(isOn: $store.hotKeyEnabled) {
                     HStack {
-                        Text("Atalho global no teclado")
+                        Text(L10n.t("Atalho global no teclado", "Global keyboard shortcut"))
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
                         Spacer()
@@ -267,6 +282,12 @@ public struct SettingsView: View {
                 }
                 .toggleStyle(.checkbox)
             }
+
+            Divider()
+                .background(Color.white.opacity(0.08))
+
+            // Security Section
+            securitySection
 
             Divider()
                 .background(Color.white.opacity(0.08))
@@ -507,6 +528,100 @@ public struct SettingsView: View {
                 }
                 .padding(9)
                 .glassCard(cornerRadius: 8, fill: AppTheme.amberAccent.opacity(0.12), borderColor: AppTheme.amberAccent.opacity(0.25))
+            }
+        }
+    }
+
+    private var securitySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "lock.shield.fill")
+                    .foregroundColor(AppTheme.amberAccent)
+                Text(L10n.t("Segurança & Confirmações", "Security & Confirmations"))
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundColor(.white)
+            }
+
+            if BiometricAuthHelper.isBiometricsAvailable {
+                Toggle(isOn: $store.requireBiometricsForSensitiveActions) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "touchid")
+                        Text(L10n.t("Exigir Touch ID para destrancar fechaduras", "Require Touch ID to unlock doors"))
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+                .toggleStyle(.checkbox)
+            }
+
+            Toggle(isOn: $store.confirmTurnOffAll) {
+                Text(L10n.t("Confirmar antes de 'Apagar Tudo'", "Confirm before 'Turn Off All'"))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+            .toggleStyle(.checkbox)
+
+            Button {
+                isShowingAuditLog.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text(L10n.t("Histórico de Ações Recentes (\(auditLogger.entries.count))", "Recent Actions History (\(auditLogger.entries.count))"))
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(AppTheme.amberAccent)
+            }
+            .buttonStyle(.plain)
+
+            if isShowingAuditLog {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(L10n.t("Últimas 50 ações:", "Last 50 actions:"))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.6))
+                        Spacer()
+                        Button(L10n.t("Limpar", "Clear")) {
+                            auditLogger.clear()
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white.opacity(0.5))
+                        .buttonStyle(.plain)
+                    }
+
+                    if auditLogger.entries.isEmpty {
+                        Text(L10n.t("Nenhuma ação registrada.", "No actions logged."))
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.4))
+                            .padding(.vertical, 4)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(auditLogger.entries) { entry in
+                                    HStack(spacing: 6) {
+                                        Text(entry.formattedTime)
+                                            .font(.system(size: 9.5, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.45))
+                                        Text(entry.entityName)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.9))
+                                        Text("•")
+                                            .foregroundColor(.white.opacity(0.3))
+                                        Text(entry.action)
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(entry.wasBiometric ? AppTheme.amberAccent : .white.opacity(0.75))
+                                        Spacer()
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 100)
+                        .padding(6)
+                        .background(Color.black.opacity(0.3))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                .padding(8)
+                .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.03), borderColor: Color.white.opacity(0.08))
             }
         }
     }

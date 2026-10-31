@@ -26,7 +26,7 @@ public enum HaBarApp {
 }
 
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private let store = HomeAssistantStore()
@@ -66,6 +66,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingController.sizingOptions = [.preferredContentSize]
 
         popover.contentViewController = hostingController
+        popover.delegate = self
         popover.behavior = .transient
         popover.animates = true
         popover.appearance = NSAppearance(named: .darkAqua)
@@ -79,24 +80,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        updateStatusButton(activeCount: store.activeLightsCount, status: store.connectionStatus)
+        updateStatusButton(status: store.connectionStatus, mode: store.menuBarDisplayMode)
     }
 
     private func observeStoreChanges() {
-        Publishers.CombineLatest(
-            store.$devices.map { devices in
-                devices.reduce(0) { $0 + ($1.domain.countsAsActive && $1.isOn ? 1 : 0) }
-            }.removeDuplicates(),
-            store.$connectionStatus.removeDuplicates()
+        Publishers.CombineLatest3(
+            store.$devices,
+            store.$connectionStatus.removeDuplicates(),
+            store.$menuBarDisplayMode.removeDuplicates()
         )
         .receive(on: RunLoop.main)
-        .sink { [weak self] activeCount, status in
-            self?.updateStatusButton(activeCount: activeCount, status: status)
+        .sink { [weak self] _, status, mode in
+            self?.updateStatusButton(status: status, mode: mode)
         }
         .store(in: &cancellables)
     }
 
-    private func updateStatusButton(activeCount: Int, status: HAConnectionStatus) {
+    private func updateStatusButton(status: HAConnectionStatus, mode: MenuBarDisplayMode) {
         guard let button = statusItem?.button else { return }
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
 
@@ -126,12 +126,47 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = icon
         button.toolTip = tooltip
 
-        if activeCount > 0 {
-            button.title = " \(activeCount)"
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        } else {
-            button.title = ""
+        let title: String
+        let activeCount = store.activeLightsCount
+        let power = store.totalPowerWatts
+
+        switch mode {
+        case .activeLights:
+            title = activeCount > 0 ? " \(activeCount)" : ""
+        case .totalPower:
+            title = power > 0 ? " \(Int(power))W" : ""
+        case .primaryTemperature:
+            if let temp = store.primaryTemperatureCelsius {
+                title = String(format: " %.1f°C", temp)
+            } else {
+                title = activeCount > 0 ? " \(activeCount)" : ""
+            }
+        case .lightsAndPower:
+            if activeCount > 0 && power > 0 {
+                title = " \(activeCount) • \(Int(power))W"
+            } else if activeCount > 0 {
+                title = " \(activeCount)"
+            } else if power > 0 {
+                title = " \(Int(power))W"
+            } else {
+                title = ""
+            }
+        case .iconOnly:
+            title = ""
         }
+
+        button.title = title
+        if !title.isEmpty {
+            button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        }
+    }
+
+    public func popoverDidClose(_ notification: Notification) {
+        store.setPopoverPresented(false)
+    }
+
+    public func popoverWillShow(_ notification: Notification) {
+        store.setPopoverPresented(true)
     }
 
     @objc private func handleStatusItemClick(_ sender: AnyObject?) {
@@ -198,7 +233,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func contextTurnOffAll() {
-        store.turnOffAllLights()
+        if store.confirmTurnOffAll {
+            showPopover()
+        }
+        store.requestTurnOffAllLights()
     }
 
     @objc private func contextSyncNow() {

@@ -158,6 +158,19 @@ public struct MainPopoverView: View {
                 NSApp.keyWindow?.performClose(nil)
             }
         }
+        .onKeyPress(characters: .decimalDigits) { press in
+            guard !store.isShowingSettings && !store.isSearchVisible else { return .ignored }
+            if let digit = Int(press.characters), (1...9).contains(digit) {
+                let roomIndex = digit - 1
+                if store.rooms.indices.contains(roomIndex) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        store.selectedRoom = store.rooms[roomIndex]
+                    }
+                    return .handled
+                }
+            }
+            return .ignored
+        }
     }
 
     // MARK: - Main Dashboard
@@ -401,34 +414,125 @@ public struct MainPopoverView: View {
     }
 
     private var searchFieldSection: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.5))
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.5))
 
-            TextField("Buscar lâmpada ou dispositivo...", text: $store.searchQuery)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-                .foregroundColor(.white)
+                TextField(L10n.t("Buscar ou comandar (ex: sala 50, apagar tudo)...", "Search or command (e.g. living 50, turn off all)..."), text: $store.searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .foregroundColor(.white)
+                    .onSubmit {
+                        if let action = spotlightAction {
+                            executeSpotlightAction(action)
+                        }
+                    }
 
-            if !store.searchQuery.isEmpty {
+                if !store.searchQuery.isEmpty {
+                    Button {
+                        store.searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .glassCard(
+                cornerRadius: AppTheme.controlCornerRadius,
+                fill: Color.black.opacity(0.32),
+                borderColor: Color.white.opacity(0.12)
+            )
+
+            if let action = spotlightAction {
                 Button {
-                    store.searchQuery = ""
+                    executeSpotlightAction(action)
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.5))
+                    HStack(spacing: 6) {
+                        Image(systemName: action.icon)
+                            .foregroundColor(AppTheme.amberAccent)
+                        Text(action.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .glassCard(
+                        cornerRadius: 6,
+                        fill: AppTheme.amberAccent.opacity(0.18),
+                        borderColor: AppTheme.amberAccent.opacity(0.35)
+                    )
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .glassCard(
-            cornerRadius: AppTheme.controlCornerRadius,
-            fill: Color.black.opacity(0.32),
-            borderColor: Color.white.opacity(0.12)
-        )
+    }
+
+    private var spotlightAction: SpotlightAction? {
+        let q = store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return nil }
+
+        if q == "apagar tudo" || q == "desligar tudo" || q == "off all" || q == "turn off all" {
+            return .turnOffAll
+        }
+
+        if let scene = store.scenes.first(where: { $0.name.lowercased().contains(q) }) {
+            return .runScene(scene)
+        }
+
+        let parts = q.split(separator: " ")
+        if parts.count >= 2, let lastNum = Double(parts.last!), (0...100).contains(lastNum) {
+            let nameQuery = parts.dropLast().joined(separator: " ")
+            if let dev = store.devices.first(where: { $0.domain == .light && $0.name.lowercased().contains(nameQuery) }) {
+                return .setBrightness(dev, lastNum)
+            }
+        }
+
+        return nil
+    }
+
+    private enum SpotlightAction {
+        case turnOffAll
+        case runScene(HASceneItem)
+        case setBrightness(HADeviceItem, Double)
+
+        var title: String {
+            switch self {
+            case .turnOffAll:
+                return L10n.t("Apagar todas as lâmpadas [Enter ↵]", "Turn off all lights [Enter ↵]")
+            case .runScene(let scene):
+                return L10n.t("Executar cena: \(scene.name) [Enter ↵]", "Activate scene: \(scene.name) [Enter ↵]")
+            case .setBrightness(let dev, let pct):
+                return L10n.t("Definir \(dev.name) para \(Int(pct))% [Enter ↵]", "Set \(dev.name) to \(Int(pct))% [Enter ↵]")
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .turnOffAll: return "lightbulb.slash"
+            case .runScene: return "sparkles"
+            case .setBrightness: return "slider.horizontal.3"
+            }
+        }
+    }
+
+    private func executeSpotlightAction(_ action: SpotlightAction) {
+        switch action {
+        case .turnOffAll:
+            store.requestTurnOffAllLights()
+        case .runScene(let scene):
+            store.activateScene(scene.id)
+        case .setBrightness(let dev, let pct):
+            store.setBrightness(for: dev.id, percentage: pct)
+        }
+        store.searchQuery = ""
+        store.isSearchVisible = false
     }
 
     private var scenesSection: some View {
