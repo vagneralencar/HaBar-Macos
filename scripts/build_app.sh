@@ -3,7 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "🔨 Building HaBar (macOS Menu Bar App for Home Assistant)..."
+VERSION="1.6.0"
+BUILD_NUMBER="7"
+
+echo "🔨 Building HaBar v${VERSION} (macOS Menu Bar App for Home Assistant)..."
 swift build -c release
 
 APP_NAME="HaBar.app"
@@ -44,9 +47,9 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.5.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
