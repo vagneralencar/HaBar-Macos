@@ -72,7 +72,15 @@ public struct HARoom: Identifiable, Equatable, Hashable, Sendable {
         self.name = name
     }
 
+    public var displayName: String {
+        if id == HARoom.favorites.id { return L10n.t("Favoritos", "Favorites") }
+        if id == HARoom.unassigned.id { return L10n.t("Sem cômodo", "No room") }
+        return name
+    }
+
     public var shortDisplayName: String {
+        if id == HARoom.favorites.id { return L10n.t("Favoritos", "Favorites") }
+        if id == HARoom.unassigned.id { return L10n.t("Sem cômodo", "No room") }
         let lower = name.lowercased()
         if lower == "sala de jantar" { return "Sala Jantar" }
         if lower == "sala de estar" { return "Sala Estar" }

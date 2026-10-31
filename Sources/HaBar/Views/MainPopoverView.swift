@@ -385,7 +385,7 @@ public struct MainPopoverView: View {
 
         return VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text("Iluminação & Dispositivos — \(store.selectedRoom.name)")
+                Text(L10n.t("Iluminação & Dispositivos — \(store.selectedRoom.displayName)", "Lighting & Devices — \(store.selectedRoom.displayName)"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.92))
 
@@ -504,7 +504,7 @@ private struct RoomPillButton: View {
 
                 TruncatedTextWithPopover(
                     room.shortDisplayName,
-                    fullText: room.name,
+                    fullText: room.displayName,
                     font: .system(size: 11, weight: isSelected ? .semibold : .medium),
                     foregroundColor: .white.opacity(isSelected ? 1.0 : 0.72),
                     isParentHovered: isHovered
@@ -536,20 +536,20 @@ private struct RoomPillButton: View {
             Button {
                 onSetRoomPower(true)
             } label: {
-                Label("Ligar tudo em \(room.name)", systemImage: "lightbulb.fill")
+                Label(L10n.t("Ligar tudo em \(room.displayName)", "Turn on all in \(room.displayName)"), systemImage: "lightbulb.fill")
             }
 
             Button {
                 onSetRoomPower(false)
             } label: {
-                Label("Desligar tudo em \(room.name)", systemImage: "lightbulb.slash")
+                Label(L10n.t("Desligar tudo em \(room.displayName)", "Turn off all in \(room.displayName)"), systemImage: "lightbulb.slash")
             }
         }
         .onHover { hovering in
             isHovered = hovering
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(room.name)
+        .accessibilityLabel(room.displayName)
         .accessibilityValue(hasActive ? L10n.t("Dispositivos ligados", "Active devices") : L10n.t("Desligado", "Off"))
         .accessibilityHint(L10n.t("Toque para ver este cômodo.", "Tap to view this room."))
         .zIndex(isHovered ? 100 : 1)
@@ -755,7 +755,7 @@ private struct DeviceControlCard: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(device.name)
         .accessibilityValue(device.formattedStatusLine)
         .accessibilityHint(device.isReadOnly ? "" : L10n.t("Toque para alternar o estado.", "Tap to toggle state."))
