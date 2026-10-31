@@ -563,10 +563,10 @@ public struct MainPopoverView: View {
                 if store.activeLightsCount > 0 {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            store.turnOffAllLights()
+                            store.requestTurnOffAllLights()
                         }
                     } label: {
-                        Text("• Apagar Tudo")
+                        Text(L10n.t("• Apagar Tudo", "• Turn Off All"))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.white.opacity(0.55))
                     }
