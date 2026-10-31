@@ -75,7 +75,7 @@ public enum HADomain: String, Codable, CaseIterable, Sendable {
     /// Whether an "on" device of this kind should count toward the "N devices on" badge.
     public var countsAsActive: Bool {
         switch self {
-        case .light, .switch, .fan, .climate: return true
+        case .light, .switch, .fan, .climate, .mediaPlayer: return true
         default: return false
         }
     }
@@ -287,7 +287,10 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
         case .sensor, .binarySensor:
             return statusSubtitle ?? "—"
         case .mediaPlayer:
-            baseLine = statusSubtitle ?? (isOn ? L10n.t("Ligado", "On") : L10n.t("Desligado", "Off"))
+            let isTV = (deviceClass == "tv") || id.contains("tv") || name.lowercased().contains("tv") || name.lowercased().contains("fire") || name.lowercased().contains("stick")
+            let defaultOn = isTV ? L10n.t("Ligada", "On") : L10n.t("Ligado", "On")
+            let defaultOff = isTV ? L10n.t("Desligada", "Off") : L10n.t("Desligado", "Off")
+            baseLine = statusSubtitle ?? (isOn ? defaultOn : defaultOff)
         case .light where supportsBrightness:
             baseLine = isOn ? L10n.t("Ligado • \(Int(brightnessPct.rounded()))%", "On • \(Int(brightnessPct.rounded()))%") : L10n.t("Desligado", "Off")
         default:
@@ -477,8 +480,13 @@ public enum HAEntityMapper {
             let unlocked = ["unlocked", "open", "unlocking"].contains(state)
             return HADeviceItem(id: entityId, name: name, domain: .lock, room: room, icon: unlocked ? "lock.open.fill" : "lock.fill", isOn: unlocked)
         case "media_player":
-            var device = HADeviceItem(id: entityId, name: name, domain: .mediaPlayer, room: room, icon: "play.rectangle.fill", isOn: !offStates.contains(state) && state != "standby")
-            device.statusSubtitle = mediaStatus(state)
+            let isTV = isTVDevice(entityId: entityId, name: name, attrs: attrs)
+            let icon = mediaIcon(entityId: entityId, name: name, attrs: attrs, isTV: isTV)
+            let isOn = !offStates.contains(state) && state != "standby"
+            var device = HADeviceItem(id: entityId, name: name, domain: .mediaPlayer, room: room, icon: icon, isOn: isOn)
+            device.deviceClass = attrs["device_class"] as? String ?? (isTV ? "tv" : nil)
+            device.statusSubtitle = mediaStatus(state: state, attrs: attrs, isTV: isTV)
+            device.powerWatts = extractPowerWatts(from: attrs)
             return device
         case "sensor":
             guard let deviceClass = attrs["device_class"] as? String, readOnlySensorClasses.contains(deviceClass) else { return nil }
@@ -649,12 +657,84 @@ public enum HAEntityMapper {
 
     // MARK: - Presentation helpers
 
-    private static func mediaStatus(_ state: String) -> String? {
+    static func isTVDevice(entityId: String, name: String, attrs: [String: Any]) -> Bool {
+        if let dc = attrs["device_class"] as? String, dc.lowercased() == "tv" {
+            return true
+        }
+        let lower = "\(entityId) \(name)".lowercased()
+        return lower.contains("tv")
+            || lower.contains("fire")
+            || lower.contains("stick")
+            || lower.contains("chromecast")
+            || lower.contains("roku")
+            || lower.contains("apple tv")
+            || lower.contains("bravia")
+            || lower.contains("webos")
+            || lower.contains("tizen")
+    }
+
+    private static func mediaIcon(entityId: String, name: String, attrs: [String: Any], isTV: Bool) -> String {
+        if isTV { return "tv.fill" }
+        if let dc = attrs["device_class"] as? String {
+            switch dc.lowercased() {
+            case "speaker": return "hifispeaker.fill"
+            case "receiver": return "av.remote.fill"
+            default: break
+            }
+        }
+        return "play.rectangle.fill"
+    }
+
+    private static func mediaStatus(state: String, attrs: [String: Any], isTV: Bool) -> String? {
+        let appName = (attrs["app_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = (attrs["source"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mediaTitle = (attrs["media_title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mediaArtist = (attrs["media_artist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let activeApp = (appName?.isEmpty == false) ? appName : ((source?.isEmpty == false) ? source : nil)
+
         switch state {
-        case "playing": return L10n.t("Reproduzindo", "Playing")
-        case "paused": return L10n.t("Pausado", "Paused")
-        case "idle": return L10n.t("Ocioso", "Idle")
-        default: return nil
+        case "playing":
+            if let title = mediaTitle, !title.isEmpty {
+                if let artist = mediaArtist, !artist.isEmpty {
+                    return "\(title) • \(artist)"
+                }
+                if let app = activeApp, app != title {
+                    return "\(title) • \(app)"
+                }
+                return title
+            }
+            if let app = activeApp {
+                return L10n.t("Reproduzindo • \(app)", "Playing • \(app)")
+            }
+            return L10n.t("Reproduzindo", "Playing")
+
+        case "paused":
+            if let title = mediaTitle, !title.isEmpty {
+                return L10n.t("Pausado • \(title)", "Paused • \(title)")
+            }
+            if let app = activeApp {
+                return L10n.t("Pausado • \(app)", "Paused • \(app)")
+            }
+            return L10n.t("Pausado", "Paused")
+
+        case "idle", "on":
+            if let app = activeApp {
+                return isTV ? L10n.t("Ligada • \(app)", "On • \(app)") : L10n.t("Ligado • \(app)", "On • \(app)")
+            }
+            return isTV ? L10n.t("Ligada", "On") : L10n.t("Ligado", "On")
+
+        case "buffering":
+            return L10n.t("Carregando…", "Buffering…")
+
+        case "standby":
+            return L10n.t("Em espera", "Standby")
+
+        case "off":
+            return isTV ? L10n.t("Desligada", "Off") : L10n.t("Desligado", "Off")
+
+        default:
+            return nil
         }
     }
 

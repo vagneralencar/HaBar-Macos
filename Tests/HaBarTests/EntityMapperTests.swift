@@ -149,4 +149,73 @@ final class EntityMapperTests: XCTestCase {
         XCTAssertEqual(plug.powerWatts, 1450)
         XCTAssertTrue(plug.formattedStatusLine.contains("1450 W"))
     }
+
+    func testMediaPlayerAndTVMapping() throws {
+        L10n.forcedLanguage = "pt"
+        defer { L10n.forcedLanguage = nil }
+
+        let states: [[String: Any]] = [
+            [
+                "entity_id": "media_player.escritorio_fire_tv_escritorio",
+                "state": "idle",
+                "attributes": [
+                    "friendly_name": "Fire TV Escritório",
+                    "device_class": "tv",
+                    "adb_response": "JARVIS_GLOBO_TRANSMISSAO"
+                ]
+            ],
+            [
+                "entity_id": "media_player.sala_tv",
+                "state": "idle",
+                "attributes": [
+                    "friendly_name": "Smart TV Sala",
+                    "device_class": "tv",
+                    "app_name": "Prime Video"
+                ]
+            ],
+            [
+                "entity_id": "media_player.sala_som",
+                "state": "playing",
+                "attributes": [
+                    "friendly_name": "Echo Sala",
+                    "device_class": "speaker",
+                    "media_title": "Bohemian Rhapsody",
+                    "media_artist": "Queen"
+                ]
+            ],
+            [
+                "entity_id": "media_player.quarto_tv",
+                "state": "off",
+                "attributes": [
+                    "friendly_name": "TV Quarto",
+                    "device_class": "tv"
+                ]
+            ]
+        ]
+
+        let result = HAEntityMapper.mapStates(states, entityToRoom: [:])
+        let fireTV = try XCTUnwrap(result.devices.first { $0.id == "media_player.escritorio_fire_tv_escritorio" })
+        XCTAssertEqual(fireTV.domain, .mediaPlayer)
+        XCTAssertTrue(fireTV.isOn)
+        XCTAssertEqual(fireTV.iconSystemName, "tv.fill")
+        XCTAssertEqual(fireTV.statusSubtitle, "Ligada")
+        XCTAssertNotEqual(fireTV.statusSubtitle, "Ocioso")
+        XCTAssertEqual(fireTV.formattedStatusLine, "Ligada")
+        XCTAssertTrue(fireTV.domain.countsAsActive)
+
+        let smartTV = try XCTUnwrap(result.devices.first { $0.id == "media_player.sala_tv" })
+        XCTAssertTrue(smartTV.isOn)
+        XCTAssertEqual(smartTV.iconSystemName, "tv.fill")
+        XCTAssertEqual(smartTV.statusSubtitle, "Ligada • Prime Video")
+
+        let speaker = try XCTUnwrap(result.devices.first { $0.id == "media_player.sala_som" })
+        XCTAssertTrue(speaker.isOn)
+        XCTAssertEqual(speaker.iconSystemName, "hifispeaker.fill")
+        XCTAssertEqual(speaker.statusSubtitle, "Bohemian Rhapsody • Queen")
+
+        let tvOff = try XCTUnwrap(result.devices.first { $0.id == "media_player.quarto_tv" })
+        XCTAssertFalse(tvOff.isOn)
+        XCTAssertEqual(tvOff.statusSubtitle, "Desligada")
+        XCTAssertEqual(tvOff.formattedStatusLine, "Desligada")
+    }
 }
