@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="1.7.0"
+VERSION="1.7.1"
 BUILD_NUMBER="7"
 
 echo "🔨 Building HaBar v${VERSION} (macOS Menu Bar App for Home Assistant)..."
