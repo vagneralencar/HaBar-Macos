@@ -131,4 +131,22 @@ final class EntityMapperTests: XCTestCase {
         XCTAssertEqual(light.rgbColor.blue, 50)
         XCTAssertEqual(light.activeEffect, "Rainbow")
     }
+
+    func testExtractPowerWatts() throws {
+        let states: [[String: Any]] = [
+            [
+                "entity_id": "switch.tomada_cafeteira",
+                "state": "on",
+                "attributes": [
+                    "friendly_name": "Cafeteira",
+                    "current_consumption": 1450.4
+                ]
+            ]
+        ]
+
+        let result = HAEntityMapper.mapStates(states, entityToRoom: [:])
+        let plug = try XCTUnwrap(result.devices.first)
+        XCTAssertEqual(plug.powerWatts, 1450)
+        XCTAssertTrue(plug.formattedStatusLine.contains("1450 W"))
+    }
 }

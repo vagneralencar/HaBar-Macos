@@ -35,6 +35,12 @@
 - **Contextual Menu Bar Access**: Right-click the menu bar icon for quick actions ("Apagar Tudo", "Sincronizar Agora", "Ajustes...", "Encerrar").
 - **Sleep & Network Resilience**: Reconnects on Mac wake (`didWakeNotification`), monitors connection changes (`NWPathMonitor`), and uses exponential backoff.
 - **Update Checker**: Automatic and on-demand check for new releases directly from GitHub.
+- **Launch at Login (`SMAppService`)**: Start HaBar automatically on Mac login with modern macOS Service Management.
+- **Bonjour / mDNS Auto-Discovery**: Automatically finds Home Assistant instances on the local network (`_home-assistant._tcp`) with 1-click configuration.
+- **Appearance & Theme Modes**: Select Dark (default), Light, or System-following appearance.
+- **Keyboard Navigation**: Use `Esc` to step back from details or dismiss the popover instantly.
+- **Power Consumption Monitoring (W)**: Live wattage display on cards for smart plugs and appliances reporting energy usage.
+- **Dynamic Status Bar Icon**: Changes dynamically based on connection status (connected, reconnecting, unauthorized) with live tooltip descriptions.
 - **Real-Time WebSocket Sync**: Subscribes to `state_changed` events via `/api/websocket` with REST fallback and optimistic UI updates with automatic rollback on failure.
 
 ---

@@ -246,10 +246,11 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
     }
 
     public var formattedStatusLine: String {
+        let baseLine: String
         switch domain {
         case .climate:
             let label = Self.modeTitle(hvacMode ?? L10n.t("Sem estado", "No state"))
-            return label + (isAssumedState ? L10n.t(" · estimado", " · estimated") : "")
+            baseLine = label + (isAssumedState ? L10n.t(" · estimado", " · estimated") : "")
         case .script:
             return isOn ? L10n.t("Enviando comando…", "Sending command…") : L10n.t("Toque para enviar", "Tap to send")
         case .lock:
@@ -260,13 +261,18 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
         case .sensor, .binarySensor:
             return statusSubtitle ?? "—"
         case .mediaPlayer:
-            return statusSubtitle ?? (isOn ? L10n.t("Ligado", "On") : L10n.t("Desligado", "Off"))
+            baseLine = statusSubtitle ?? (isOn ? L10n.t("Ligado", "On") : L10n.t("Desligado", "Off"))
         case .light where supportsBrightness:
-            return isOn ? L10n.t("Ligado • \(Int(brightnessPct.rounded()))%", "On • \(Int(brightnessPct.rounded()))%") : L10n.t("Desligado", "Off")
+            baseLine = isOn ? L10n.t("Ligado • \(Int(brightnessPct.rounded()))%", "On • \(Int(brightnessPct.rounded()))%") : L10n.t("Desligado", "Off")
         default:
-            if let custom = statusSubtitle { return isOn ? custom : L10n.t("Desligado", "Off") }
-            return isOn ? L10n.t("Ligado", "On") : L10n.t("Desligado", "Off")
+            if let custom = statusSubtitle { baseLine = isOn ? custom : L10n.t("Desligado", "Off") }
+            else { baseLine = isOn ? L10n.t("Ligado", "On") : L10n.t("Desligado", "Off") }
         }
+
+        if isOn, let watts = powerWatts, watts > 0 {
+            return "\(baseLine) • \(watts) W"
+        }
+        return baseLine
     }
 
     /// Service that turns this device on/off (or its closest equivalent, e.g. unlock/lock).
@@ -429,9 +435,12 @@ public enum HAEntityMapper {
         case "switch":
             var device = HADeviceItem(id: entityId, name: name, domain: .switch, room: room, icon: iconForSwitch(name: name), isOn: state == "on")
             device.statusSubtitle = L10n.t("Ligado", "On")
+            device.powerWatts = extractPowerWatts(from: attrs)
             return device
         case "fan":
-            return HADeviceItem(id: entityId, name: name, domain: .fan, room: room, icon: "fan.fill", isOn: state == "on")
+            var device = HADeviceItem(id: entityId, name: name, domain: .fan, room: room, icon: "fan.fill", isOn: state == "on")
+            device.powerWatts = extractPowerWatts(from: attrs)
+            return device
         case "climate":
             return makeClimate(entityId: entityId, name: name, state: state, attrs: attrs, room: room)
         case "cover":
@@ -496,7 +505,7 @@ public enum HAEntityMapper {
             availableEffects: effects,
             iconSystemName: iconForLight(id: entityId, name: name),
             statusSubtitle: nil,
-            powerWatts: nil
+            powerWatts: extractPowerWatts(from: attrs)
         )
     }
 
@@ -584,6 +593,22 @@ public enum HAEntityMapper {
             return String(raw.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return raw
+    }
+
+    private static func extractPowerWatts(from attrs: [String: Any]) -> Int? {
+        if let watts = (attrs["current_consumption"] as? Double)
+            ?? (attrs["power"] as? Double)
+            ?? (attrs["current_power_w"] as? Double)
+            ?? (attrs["power_consumption"] as? Double) {
+            return Int(watts.rounded())
+        }
+        if let watts = (attrs["current_consumption"] as? Int)
+            ?? (attrs["power"] as? Int)
+            ?? (attrs["current_power_w"] as? Int)
+            ?? (attrs["power_consumption"] as? Int) {
+            return watts
+        }
+        return nil
     }
 
     private static func extractRGB(from attrs: [String: Any]) -> RGBColor? {

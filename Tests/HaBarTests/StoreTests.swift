@@ -133,4 +133,18 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(mockAPI.lastServiceCall?.domain, "lock")
         XCTAssertEqual(mockAPI.lastServiceCall?.service, "unlock")
     }
+
+    func testThemeModePersistence() {
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_theme_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        XCTAssertEqual(store.themeMode, .dark)
+        store.themeMode = .light
+
+        // Re-creating store with same defaults preserves selection
+        let store2 = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+        XCTAssertEqual(store2.themeMode, .light)
+    }
 }

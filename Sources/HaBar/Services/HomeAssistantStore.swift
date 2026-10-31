@@ -37,6 +37,28 @@ public struct ToastMessage: Identifiable, Equatable {
     public let isError: Bool
 }
 
+public enum AppThemeMode: String, CaseIterable, Sendable {
+    case dark
+    case light
+    case system
+
+    public var title: String {
+        switch self {
+        case .dark: return L10n.t("Escuro", "Dark")
+        case .light: return L10n.t("Claro", "Light")
+        case .system: return L10n.t("Sistema", "System")
+        }
+    }
+
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .dark: return .dark
+        case .light: return .light
+        case .system: return nil
+        }
+    }
+}
+
 /// A destructive/safety-sensitive action waiting for the user's explicit confirmation.
 public struct ConfirmationRequest: Identifiable {
     public let id = UUID()
@@ -76,6 +98,9 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     @Published public var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
+    @Published public var themeMode: AppThemeMode {
+        didSet { defaults.set(themeMode.rawValue, forKey: Keys.themeMode) }
+    }
 
     public let isScreenshotPreview: Bool
 
@@ -85,6 +110,7 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         static let favoriteOverrides = "habar.favoriteOverrides"
         static let hotKeyEnabled = "habar.hotKeyEnabled"
         static let autoCheckUpdates = "habar.autoCheckUpdates"
+        static let themeMode = "habar.themeMode"
     }
 
     private let client: HomeAssistantAPI
@@ -119,6 +145,7 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         self.favoriteOverrides = defaults.dictionary(forKey: Keys.favoriteOverrides) as? [String: Bool] ?? [:]
         self.hotKeyEnabled = defaults.object(forKey: Keys.hotKeyEnabled) as? Bool ?? true
         self.autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
+        self.themeMode = defaults.string(forKey: Keys.themeMode).flatMap(AppThemeMode.init) ?? .dark
 
         let savedURL = KeychainHelper.serverURLString
         let savedToken = KeychainHelper.loadToken()
@@ -153,6 +180,7 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         self.favoriteOverrides = [:]
         self.hotKeyEnabled = true
         self.autoCheckUpdates = false
+        self.themeMode = .dark
         self.serverURLString = "http://homeassistant.local:8123"
         self.accessToken = ""
         self.connectionStatus = .connected(host: "homeassistant.local")

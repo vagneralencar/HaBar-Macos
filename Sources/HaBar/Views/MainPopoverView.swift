@@ -144,7 +144,20 @@ public struct MainPopoverView: View {
         }
         .frame(width: AppTheme.popoverWidth)
         .fixedSize(horizontal: false, vertical: true)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(store.themeMode.colorScheme)
+        .onExitCommand {
+            if store.isShowingSettings {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                    store.isShowingSettings = false
+                }
+            } else if store.selectedDeviceForDetail != nil {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                    store.selectedDeviceForDetail = nil
+                }
+            } else {
+                NSApp.keyWindow?.performClose(nil)
+            }
+        }
     }
 
     // MARK: - Main Dashboard

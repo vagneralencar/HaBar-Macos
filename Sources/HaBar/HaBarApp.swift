@@ -79,28 +79,52 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        updateStatusButtonLabel(activeCount: store.activeLightsCount)
+        updateStatusButton(activeCount: store.activeLightsCount, status: store.connectionStatus)
     }
 
     private func observeStoreChanges() {
-        store.$devices
-            .map { devices in
-                devices.reduce(0) { $0 + ($1.domain != .script && $1.isOn ? 1 : 0) }
-            }
-            .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] activeCount in
-                self?.updateStatusButtonLabel(activeCount: activeCount)
-            }
-            .store(in: &cancellables)
+        Publishers.CombineLatest(
+            store.$devices.map { devices in
+                devices.reduce(0) { $0 + ($1.domain.countsAsActive && $1.isOn ? 1 : 0) }
+            }.removeDuplicates(),
+            store.$connectionStatus.removeDuplicates()
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] activeCount, status in
+            self?.updateStatusButton(activeCount: activeCount, status: status)
+        }
+        .store(in: &cancellables)
     }
 
-    private func updateStatusButtonLabel(activeCount: Int) {
+    private func updateStatusButton(activeCount: Int, status: HAConnectionStatus) {
         guard let button = statusItem?.button else { return }
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        let icon = NSImage(systemSymbolName: "house.fill", accessibilityDescription: "HaBar")?.withSymbolConfiguration(config)
+
+        let symbolName: String
+        let tooltip: String
+
+        switch status {
+        case .connected(let host):
+            symbolName = "house.fill"
+            tooltip = "HaBar — Conectado a \(host)"
+        case .demoMode(let host):
+            symbolName = "house.fill"
+            tooltip = "HaBar — Modo Demo (\(host))"
+        case .connecting:
+            symbolName = "house"
+            tooltip = "HaBar — Conectando ao Home Assistant…"
+        case .reconnecting:
+            symbolName = "house.slash.fill"
+            tooltip = "HaBar — Sem conexão • Reconectando…"
+        case .unauthorized:
+            symbolName = "exclamationmark.shield.fill"
+            tooltip = "HaBar — Token inválido ou expirado"
+        }
+
+        let icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: "HaBar")?.withSymbolConfiguration(config)
         icon?.isTemplate = true
         button.image = icon
+        button.toolTip = tooltip
 
         if activeCount > 0 {
             button.title = " \(activeCount)"

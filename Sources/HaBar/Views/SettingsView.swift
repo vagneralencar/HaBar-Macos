@@ -3,6 +3,9 @@ import AppKit
 
 public struct SettingsView: View {
     @ObservedObject public var store: HomeAssistantStore
+    @ObservedObject private var launchManager = LaunchAtLoginManager.shared
+    @ObservedObject private var bonjour = BonjourDiscovery.shared
+
     @State private var urlInput: String = ""
     @State private var tokenInput: String = ""
     @State private var showPlainToken: Bool = false
@@ -42,6 +45,30 @@ public struct SettingsView: View {
 
                 TextField("http://homeassistant.local:8123", text: $urlInput)
                     .glassInputField()
+
+                if !bonjour.discoveredServers.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Servidor detectado na rede:")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(.white.opacity(0.55))
+
+                        ForEach(bonjour.discoveredServers) { srv in
+                            Button {
+                                urlInput = srv.urlString
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "network.badge.shield.half.filled")
+                                    Text("\(srv.name) — \(srv.urlString)")
+                                        .lineLimit(1)
+                                }
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(AppTheme.amberAccent)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
 
             // Access Token Section
@@ -166,6 +193,20 @@ public struct SettingsView: View {
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundColor(.white.opacity(0.75))
 
+                HStack {
+                    Text("Aparência")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Picker("", selection: $store.themeMode) {
+                        ForEach(AppThemeMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 195)
+                }
+
                 Toggle(isOn: $store.hotKeyEnabled) {
                     HStack {
                         Text("Atalho global no teclado")
@@ -179,6 +220,16 @@ public struct SettingsView: View {
                             .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.12)))
                             .foregroundColor(.white.opacity(0.8))
                     }
+                }
+                .toggleStyle(.checkbox)
+
+                Toggle(isOn: Binding(
+                    get: { launchManager.isEnabled },
+                    set: { launchManager.setEnabled($0) }
+                )) {
+                    Text("Iniciar automaticamente com o macOS")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
                 }
                 .toggleStyle(.checkbox)
 
@@ -272,6 +323,11 @@ public struct SettingsView: View {
         .onAppear {
             urlInput = store.serverURLString
             tokenInput = store.accessToken
+            launchManager.refreshStatus()
+            bonjour.startBrowsing()
+        }
+        .onDisappear {
+            bonjour.stopBrowsing()
         }
     }
 
