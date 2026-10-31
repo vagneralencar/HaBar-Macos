@@ -101,6 +101,15 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     @Published public var themeMode: AppThemeMode {
         didSet { defaults.set(themeMode.rawValue, forKey: Keys.themeMode) }
     }
+    @Published public var language: AppLanguage {
+        didSet {
+            defaults.set(language.rawValue, forKey: Keys.language)
+            L10n.forcedLanguage = language == .system ? nil : language.rawValue
+        }
+    }
+    @Published public var defaultOpeningRoomId: String {
+        didSet { defaults.set(defaultOpeningRoomId, forKey: Keys.defaultOpeningRoomId) }
+    }
 
     public let isScreenshotPreview: Bool
 
@@ -111,6 +120,8 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         static let hotKeyEnabled = "habar.hotKeyEnabled"
         static let autoCheckUpdates = "habar.autoCheckUpdates"
         static let themeMode = "habar.themeMode"
+        static let language = "habar.language"
+        static let defaultOpeningRoomId = "habar.defaultOpeningRoomId"
     }
 
     private let client: HomeAssistantAPI
@@ -147,6 +158,13 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         self.autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         self.themeMode = defaults.string(forKey: Keys.themeMode).flatMap(AppThemeMode.init) ?? .dark
 
+        let savedLang = defaults.string(forKey: Keys.language).flatMap(AppLanguage.init) ?? .system
+        self.language = savedLang
+        L10n.forcedLanguage = savedLang == .system ? nil : savedLang.rawValue
+
+        let savedDefaultRoom = defaults.string(forKey: Keys.defaultOpeningRoomId) ?? HARoom.favorites.id
+        self.defaultOpeningRoomId = savedDefaultRoom
+
         let savedURL = KeychainHelper.serverURLString
         let savedToken = KeychainHelper.loadToken()
         self.serverURLString = savedURL
@@ -181,6 +199,8 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
         self.hotKeyEnabled = true
         self.autoCheckUpdates = false
         self.themeMode = .dark
+        self.language = .pt
+        self.defaultOpeningRoomId = HARoom.favorites.id
         self.serverURLString = "http://homeassistant.local:8123"
         self.accessToken = ""
         self.connectionStatus = .connected(host: "homeassistant.local")
@@ -195,6 +215,12 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     }
 
     // MARK: - Derived queries
+
+    public func applyOpeningRoomPreference() {
+        if let target = rooms.first(where: { $0.id == defaultOpeningRoomId }) {
+            selectedRoom = target
+        }
+    }
 
     public var hasCredentials: Bool {
         !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

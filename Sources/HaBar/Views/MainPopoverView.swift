@@ -548,6 +548,10 @@ private struct RoomPillButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(room.name)
+        .accessibilityValue(hasActive ? L10n.t("Dispositivos ligados", "Active devices") : L10n.t("Desligado", "Off"))
+        .accessibilityHint(L10n.t("Toque para ver este cômodo.", "Tap to view this room."))
         .zIndex(isHovered ? 100 : 1)
     }
 }
@@ -619,6 +623,10 @@ private struct ScenePillCard: View {
         .onHover { hovering in
             isHovered = hovering
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.t("Cena \(scene.name)", "Scene \(scene.name)"))
+        .accessibilityValue(scene.isActive ? L10n.t("Ativa", "Active") : L10n.t("Inativa", "Inactive"))
+        .accessibilityHint(L10n.t("Toque para ativar esta cena.", "Tap to activate this scene."))
         .zIndex(isHovered ? 100 : 1)
     }
 }
@@ -747,6 +755,10 @@ private struct DeviceControlCard: View {
         .onHover { hovering in
             isHovered = hovering
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(device.name)
+        .accessibilityValue(device.formattedStatusLine)
+        .accessibilityHint(device.isReadOnly ? "" : L10n.t("Toque para alternar o estado.", "Tap to toggle state."))
         .zIndex(isHovered ? 100 : 1)
     }
 }

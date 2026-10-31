@@ -109,5 +109,22 @@ public struct TactileSlider: View {
             )
         }
         .frame(height: height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.t("Brilho", "Brightness"))
+        .accessibilityValue("\(Int(percentage.rounded()))%")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                let newPct = min(100, percentage + 10)
+                percentage = newPct
+                onChanged(newPct)
+            case .decrement:
+                let newPct = max(0, percentage - 10)
+                percentage = newPct
+                onChanged(newPct)
+            @unknown default:
+                break
+            }
+        }
     }
 }

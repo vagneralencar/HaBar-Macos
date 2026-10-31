@@ -147,4 +147,33 @@ final class StoreTests: XCTestCase {
         let store2 = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
         XCTAssertEqual(store2.themeMode, .light)
     }
+
+    func testLanguagePreferenceAndBilingualStrings() {
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_lang_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        store.language = .en
+        XCTAssertEqual(L10n.forcedLanguage, "en")
+        XCTAssertEqual(L10n.t("Ligar", "Turn on"), "Turn on")
+
+        store.language = .pt
+        XCTAssertEqual(L10n.forcedLanguage, "pt")
+        XCTAssertEqual(L10n.t("Ligar", "Turn on"), "Ligar")
+    }
+
+    func testOpeningRoomPreference() {
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_room_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        store.defaultOpeningRoomId = HARoom.escritorio.id
+        store.selectedRoom = .salaTV
+        XCTAssertEqual(store.selectedRoom.id, HARoom.salaTV.id)
+
+        store.applyOpeningRoomPreference()
+        XCTAssertEqual(store.selectedRoom.id, HARoom.escritorio.id)
+    }
 }

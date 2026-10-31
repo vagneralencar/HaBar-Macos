@@ -41,6 +41,10 @@
 - **Keyboard Navigation**: Use `Esc` to step back from details or dismiss the popover instantly.
 - **Power Consumption Monitoring (W)**: Live wattage display on cards for smart plugs and appliances reporting energy usage.
 - **Dynamic Status Bar Icon**: Changes dynamically based on connection status (connected, reconnecting, unauthorized) with live tooltip descriptions.
+- **VoiceOver & Accessibility**: Fully accessible with custom VoiceOver labels, traits, values, hints, and adjustable actions on tactile sliders.
+- **Bilingual Interface**: Select Portuguese (Brasil), English, or System default.
+- **Default Opening Room**: Configure which room opens by default (*Favorites* or any custom room).
+- **Quick Brightness Presets**: Instant 25%, 50%, 75%, and 100% buttons in the light detail inspector.
 - **Real-Time WebSocket Sync**: Subscribes to `state_changed` events via `/api/websocket` with REST fallback and optimistic UI updates with automatic rollback on failure.
 
 ---

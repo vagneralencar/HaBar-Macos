@@ -207,6 +207,32 @@ public struct SettingsView: View {
                     .frame(width: 195)
                 }
 
+                HStack {
+                    Text(L10n.t("Idioma", "Language"))
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Picker("", selection: $store.language) {
+                        ForEach(AppLanguage.allCases, id: \.self) { lang in
+                            Text(lang.title).tag(lang)
+                        }
+                    }
+                    .frame(width: 195)
+                }
+
+                HStack {
+                    Text(L10n.t("Cômodo inicial", "Opening room"))
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Picker("", selection: $store.defaultOpeningRoomId) {
+                        ForEach(store.rooms) { room in
+                            Text(room.name).tag(room.id)
+                        }
+                    }
+                    .frame(width: 195)
+                }
+
                 Toggle(isOn: $store.hotKeyEnabled) {
                     HStack {
                         Text("Atalho global no teclado")

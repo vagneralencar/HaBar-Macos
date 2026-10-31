@@ -99,6 +99,31 @@ public struct LightDetailView: View {
                 onChanged: { store.setBrightness(for: item.id, percentage: $0) }
             )
             .padding(.vertical, 2)
+
+            HStack(spacing: 6) {
+                ForEach([25, 50, 75, 100], id: \.self) { pct in
+                    Button {
+                        store.setBrightness(for: item.id, percentage: Double(pct))
+                    } label: {
+                        Text("\(pct)%")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(Int(item.brightnessPct.rounded()) == pct && item.isOn ? .black : .white.opacity(0.8))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Int(item.brightnessPct.rounded()) == pct && item.isOn ? accent : Color.white.opacity(0.08))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(pct) por cento de brilho")
+                }
+            }
+            .padding(.bottom, 2)
         }
 
         if item.supportsColor {
