@@ -227,7 +227,7 @@ public struct SettingsView: View {
                     Spacer()
                     Picker("", selection: $store.defaultOpeningRoomId) {
                         ForEach(store.rooms) { room in
-                            Text(room.name).tag(room.id)
+                            Text(room.displayName).tag(room.id)
                         }
                     }
                     .frame(width: 195)
