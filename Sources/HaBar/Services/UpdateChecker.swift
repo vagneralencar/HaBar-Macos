@@ -3,6 +3,34 @@ import Foundation
 public struct ReleaseInfo: Equatable, Sendable {
     public let version: String
     public let url: URL
+    public let downloadURL: URL?
+    public let body: String
+    public let assetSize: Int64?
+    public let sha256: String?
+
+    public init(
+        version: String,
+        url: URL,
+        downloadURL: URL? = nil,
+        body: String = "",
+        assetSize: Int64? = nil,
+        sha256: String? = nil
+    ) {
+        self.version = version
+        self.url = url
+        self.downloadURL = downloadURL
+        self.body = body
+        self.assetSize = assetSize
+        self.sha256 = sha256
+    }
+
+    public var formattedSize: String? {
+        guard let assetSize, assetSize > 0 else { return nil }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useKB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: assetSize)
+    }
 }
 
 /// Lightweight update check against the public GitHub Releases API.
@@ -15,12 +43,46 @@ public enum UpdateChecker {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+
+        return parseRelease(from: data)
+    }
+
+    public static func parseRelease(from data: Data) -> ReleaseInfo? {
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let tag = json["tag_name"] as? String else { return nil }
 
         let pageURL = (json["html_url"] as? String).flatMap(URL.init(string:)) ?? AppInfo.releasesPage
-        return ReleaseInfo(version: normalize(tag), url: pageURL)
+        let body = json["body"] as? String ?? ""
+
+        var downloadURL: URL?
+        var assetSize: Int64?
+        var sha256: String?
+
+        if let assets = json["assets"] as? [[String: Any]] {
+            for asset in assets {
+                guard let name = asset["name"] as? String, name.hasSuffix(".zip") else { continue }
+                if let dlString = asset["browser_download_url"] as? String {
+                    downloadURL = URL(string: dlString)
+                }
+                if let size = (asset["size"] as? NSNumber)?.int64Value {
+                    assetSize = size
+                }
+                if let digest = asset["digest"] as? String, digest.hasPrefix("sha256:") {
+                    sha256 = String(digest.dropFirst(7))
+                }
+                break
+            }
+        }
+
+        return ReleaseInfo(
+            version: normalize(tag),
+            url: pageURL,
+            downloadURL: downloadURL,
+            body: body,
+            assetSize: assetSize,
+            sha256: sha256
+        )
     }
 
     /// Compares dotted numeric versions ("1.10.0" > "1.9.2"); a leading "v" is ignored.

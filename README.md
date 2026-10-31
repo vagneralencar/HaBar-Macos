@@ -34,7 +34,8 @@
 - **Global Hotkey (`⌥⌘H`)**: Instant toggle from anywhere on macOS.
 - **Contextual Menu Bar Access**: Right-click the menu bar icon for quick actions ("Apagar Tudo", "Sincronizar Agora", "Ajustes...", "Encerrar").
 - **Sleep & Network Resilience**: Reconnects on Mac wake (`didWakeNotification`), monitors connection changes (`NWPathMonitor`), and uses exponential backoff.
-- **Update Checker**: Automatic and on-demand check for new releases directly from GitHub.
+- **In-App 1-Click Auto-Updater (`AppUpdater`)**: Detects new releases via GitHub API, streams download progress, verifies package integrity, and applies in-place atomic app replacement and seamless relaunch.
+- **Homebrew Cask Support**: Official recipe under `Casks/habar.rb` (`brew install --cask habar` / `brew upgrade --cask habar`).
 - **Launch at Login (`SMAppService`)**: Start HaBar automatically on Mac login with modern macOS Service Management.
 - **Bonjour / mDNS Auto-Discovery**: Automatically finds Home Assistant instances on the local network (`_home-assistant._tcp`) with 1-click configuration.
 - **Appearance & Theme Modes**: Select Dark (default), Light, or System-following appearance.
@@ -59,9 +60,13 @@ Sources/HaBar/
 ├── Models/
 │   └── HAEntity.swift               # Value-type models (RGBColor, HARoom, HADeviceItem) & HAEntityMapper
 ├── Services/
+│   ├── AppUpdater.swift             # 1-Click in-app download, staging, quarantine strip & relaunch
+│   ├── BonjourDiscovery.swift       # ZeroConf mDNS discovery for local HA (_home-assistant._tcp)
 │   ├── HomeAssistantClient.swift    # Decoupled REST + WebSocket client
 │   ├── HomeAssistantStore.swift     # @MainActor reactive store with O(1) entity lookup
-│   └── KeychainHelper.swift         # Secure token storage (macOS Keychain + ~/.config/habar/config.json)
+│   ├── KeychainHelper.swift         # Secure token storage (macOS Keychain + ~/.config/habar/config.json)
+│   ├── LaunchAtLoginManager.swift   # macOS SMAppService integration
+│   └── UpdateChecker.swift          # GitHub Releases metadata parser & semver comparison
 └── Views/
     ├── MainPopoverView.swift        # Main Control Center dashboard
     ├── LightDetailView.swift        # RGB / Kelvin / Effects inspector

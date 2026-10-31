@@ -166,8 +166,19 @@ public struct MainPopoverView: View {
         VStack(alignment: .leading, spacing: 13) {
             headerSection
 
-            if let update = store.availableUpdate {
-                updateBanner(update)
+            if !store.isDismissedUpdateBanner {
+                switch store.updateStatus {
+                case .available(let update):
+                    updateBanner(update)
+                case .downloading(let progress, _, _):
+                    downloadingBanner(progress: progress)
+                case .readyToInstall(let update, _):
+                    readyToInstallBanner(update)
+                case .failed(let error):
+                    failedUpdateBanner(error)
+                default:
+                    EmptyView()
+                }
             }
 
             if store.isSearchVisible {
@@ -256,22 +267,137 @@ public struct MainPopoverView: View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .foregroundColor(AppTheme.amberAccent)
-            Text("Atualização \(update.version) disponível!")
+            Text(L10n.t("HaBar v\(update.version) disponível!", "HaBar v\(update.version) available!"))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.white.opacity(0.95))
+
             Spacer()
+
+            if update.downloadURL != nil {
+                Button {
+                    Task { await store.startInAppUpdate() }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text(L10n.t("Atualizar", "Update"))
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(AppTheme.amberAccent)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
             Button {
                 NSWorkspace.shared.open(update.url)
             } label: {
                 Text("Ver ↗")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundColor(AppTheme.amberAccent)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                store.dismissUpdateBanner()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .glassCard(cornerRadius: 8, fill: AppTheme.amberAccent.opacity(0.15), borderColor: AppTheme.amberAccent.opacity(0.35))
+    }
+
+    private func downloadingBanner(progress: Double) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundColor(AppTheme.amberAccent)
+                Text(L10n.t("Baixando atualização... \(Int(progress * 100))%", "Downloading update... \(Int(progress * 100))%"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.95))
+                Spacer()
+            }
+
+            ProgressView(value: progress, total: 1.0)
+                .progressViewStyle(.linear)
+                .tint(AppTheme.amberAccent)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassCard(cornerRadius: 8, fill: AppTheme.amberAccent.opacity(0.15), borderColor: AppTheme.amberAccent.opacity(0.35))
+    }
+
+    private func readyToInstallBanner(_ update: ReleaseInfo) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Text(L10n.t("v\(update.version) pronta para reiniciar!", "v\(update.version) ready to restart!"))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.95))
+
+            Spacer()
+
+            Button {
+                store.applyUpdateAndRestart()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.clockwise")
+                    Text(L10n.t("Reiniciar Agora", "Restart Now"))
+                }
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.black)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(AppTheme.amberAccent)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassCard(cornerRadius: 8, fill: Color.green.opacity(0.15), borderColor: Color.green.opacity(0.35))
+    }
+
+    private func failedUpdateBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+            Text(L10n.t("Falha ao atualizar.", "Update failed."))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.95))
+
+            Spacer()
+
+            if let update = store.availableUpdate {
+                Button {
+                    NSWorkspace.shared.open(update.url)
+                } label: {
+                    Text(L10n.t("Baixar Manualmente ↗", "Manual Download ↗"))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(AppTheme.amberAccent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                store.dismissUpdateBanner()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassCard(cornerRadius: 8, fill: Color.red.opacity(0.12), borderColor: Color.red.opacity(0.3))
     }
 
     private var searchFieldSection: some View {

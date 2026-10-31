@@ -1,8 +1,11 @@
 import Foundation
 
 public enum AppInfo {
+    public static var versionOverride: String? = nil
+
     public static var version: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
+        if let versionOverride { return versionOverride }
+        return (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
     }
 
     public static let repository = "vagneralencar/HaBar-Macos"

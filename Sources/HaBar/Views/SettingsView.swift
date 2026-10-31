@@ -13,6 +13,7 @@ public struct SettingsView: View {
     @State private var isTestingConnection: Bool = false
     @State private var testResult: ConnectionTestResult? = nil
     @State private var isCheckingUpdates: Bool = false
+    @State private var copiedBrew: Bool = false
 
     public init(store: HomeAssistantStore) {
         self.store = store
@@ -253,14 +254,14 @@ public struct SettingsView: View {
                     get: { launchManager.isEnabled },
                     set: { launchManager.setEnabled($0) }
                 )) {
-                    Text("Iniciar automaticamente com o macOS")
+                    Text(L10n.t("Iniciar automaticamente com o macOS", "Launch automatically at login"))
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundColor(.white.opacity(0.9))
                 }
                 .toggleStyle(.checkbox)
 
                 Toggle(isOn: $store.autoCheckUpdates) {
-                    Text("Verificar atualizações automaticamente ao iniciar")
+                    Text(L10n.t("Verificar atualizações automaticamente ao iniciar", "Automatically check for updates on launch"))
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundColor(.white.opacity(0.9))
                 }
@@ -270,55 +271,8 @@ public struct SettingsView: View {
             Divider()
                 .background(Color.white.opacity(0.08))
 
-            // Updates & App Info
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("HaBar v\(AppInfo.version)")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.85))
-
-                    if let msg = store.updateCheckMessage {
-                        Text(msg)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(store.availableUpdate != nil ? AppTheme.amberAccent : .white.opacity(0.55))
-                    }
-                }
-
-                Spacer()
-
-                if let update = store.availableUpdate {
-                    Button {
-                        NSWorkspace.shared.open(update.url)
-                    } label: {
-                        Text("Baixar v\(update.version) ↗")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(AppTheme.amberAccent)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Button {
-                        Task {
-                            isCheckingUpdates = true
-                            await store.checkForUpdates(userInitiated: true)
-                            isCheckingUpdates = false
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            if isCheckingUpdates {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                            }
-                            Text(isCheckingUpdates ? "Buscando…" : "Buscar Atualização")
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.75))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isCheckingUpdates)
-                }
-            }
+            // Updates Section
+            updateSection
 
             Divider()
                 .background(Color.white.opacity(0.08))
@@ -390,5 +344,170 @@ public struct SettingsView: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.04), borderColor: Color.white.opacity(0.09))
+    }
+
+    private var updateSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("HaBar v\(AppInfo.version)")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85))
+
+                    if let msg = store.updateCheckMessage {
+                        Text(msg)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(store.availableUpdate != nil ? AppTheme.amberAccent : .white.opacity(0.55))
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    Task {
+                        isCheckingUpdates = true
+                        await store.checkForUpdates(userInitiated: true)
+                        isCheckingUpdates = false
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if isCheckingUpdates {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        Text(isCheckingUpdates ? L10n.t("Buscando…", "Checking…") : L10n.t("Buscar Atualização", "Check for Updates"))
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+                .disabled(isCheckingUpdates)
+            }
+
+            if let update = store.availableUpdate {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(AppTheme.amberAccent)
+                        Text(L10n.t("Nova Versão v\(update.version)", "New Version v\(update.version)"))
+                            .font(.system(size: 11.5, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Spacer()
+
+                        if let size = update.formattedSize {
+                            Text(size)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                    }
+
+                    if !update.body.isEmpty {
+                        ScrollView {
+                            Text(update.body)
+                                .font(.system(size: 10.5))
+                                .foregroundColor(.white.opacity(0.8))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 90)
+                        .padding(6)
+                        .background(Color.black.opacity(0.3))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    // Actions
+                    switch store.updateStatus {
+                    case .downloading(let progress, _, _):
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(L10n.t("Baixando atualização...", "Downloading update..."))
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.9))
+                                Spacer()
+                                Text("\(Int(progress * 100))%")
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundColor(AppTheme.amberAccent)
+                            }
+                            ProgressView(value: progress, total: 1.0)
+                                .progressViewStyle(.linear)
+                                .tint(AppTheme.amberAccent)
+                        }
+                    case .readyToInstall:
+                        Button {
+                            store.applyUpdateAndRestart()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.clockwise")
+                                Text(L10n.t("Reiniciar e Atualizar Agora", "Restart & Update Now"))
+                            }
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.amberAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    default:
+                        HStack(spacing: 8) {
+                            if update.downloadURL != nil {
+                                Button {
+                                    Task { await store.startInAppUpdate() }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.down.circle.fill")
+                                        Text(L10n.t("Atualizar Agora", "Update Now"))
+                                    }
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(AppTheme.amberAccent)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            Button {
+                                NSWorkspace.shared.open(update.url)
+                            } label: {
+                                Text(L10n.t("Ver no GitHub ↗", "View on GitHub ↗"))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.75))
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString("brew upgrade --cask habar", forType: .string)
+                                copiedBrew = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                    copiedBrew = false
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: copiedBrew ? "checkmark" : "terminal")
+                                    Text(copiedBrew ? L10n.t("Copiado!", "Copied!") : "brew")
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white.opacity(copiedBrew ? 0.95 : 0.6))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                            .buttonStyle(.plain)
+                            .help(L10n.t("Copiar: brew upgrade --cask habar", "Copy: brew upgrade --cask habar"))
+                        }
+                    }
+                }
+                .padding(9)
+                .glassCard(cornerRadius: 8, fill: AppTheme.amberAccent.opacity(0.12), borderColor: AppTheme.amberAccent.opacity(0.25))
+            }
+        }
     }
 }

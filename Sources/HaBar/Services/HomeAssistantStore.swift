@@ -91,6 +91,9 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     @Published public var pendingConfirmation: ConfirmationRequest?
     @Published public private(set) var availableUpdate: ReleaseInfo?
     @Published public private(set) var updateCheckMessage: String?
+    @Published public var updateStatus: AppUpdateStatus = .idle
+    @Published public var isDismissedUpdateBanner: Bool = false
+    @Published public var stagedAppURL: URL? = nil
 
     @Published public var hotKeyEnabled: Bool {
         didSet { defaults.set(hotKeyEnabled, forKey: Keys.hotKeyEnabled) }
@@ -514,18 +517,72 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
     // MARK: - Updates
 
     public func checkForUpdates(userInitiated: Bool, fetcher: (() async -> ReleaseInfo?)? = nil) async {
+        updateStatus = .checking
         let fetch = fetcher ?? { await UpdateChecker.fetchLatestRelease() }
         guard let latest = await fetch() else {
+            updateStatus = .idle
             if userInitiated { updateCheckMessage = L10n.t("Não foi possível verificar atualizações.", "Couldn't check for updates.") }
             return
         }
         if UpdateChecker.isNewer(latest.version, than: AppInfo.version) {
             availableUpdate = latest
+            updateStatus = .available(latest)
             updateCheckMessage = L10n.t("Nova versão disponível: \(latest.version)", "New version available: \(latest.version)")
         } else {
             availableUpdate = nil
+            updateStatus = .upToDate
             if userInitiated { updateCheckMessage = L10n.t("Você está na versão mais recente.", "You're up to date.") }
         }
+    }
+
+    public func startInAppUpdate(
+        updater: AppUpdater = .shared,
+        downloader: ((ReleaseInfo, @escaping @Sendable (Double, Int64, Int64) -> Void) async throws -> URL)? = nil
+    ) async {
+        guard let update = availableUpdate else { return }
+        updateStatus = .downloading(progress: 0.0, bytesReceived: 0, totalBytes: update.assetSize ?? 0)
+
+        do {
+            let stagedURL: URL
+            if let customDownloader = downloader {
+                stagedURL = try await customDownloader(update) { [weak self] progress, received, total in
+                    Task { @MainActor in
+                        self?.updateStatus = .downloading(progress: progress, bytesReceived: received, totalBytes: total)
+                    }
+                }
+            } else {
+                stagedURL = try await updater.downloadAndStageUpdate(release: update) { [weak self] progress, received, total in
+                    Task { @MainActor in
+                        self?.updateStatus = .downloading(progress: progress, bytesReceived: received, totalBytes: total)
+                    }
+                }
+            }
+            self.stagedAppURL = stagedURL
+            self.updateStatus = .readyToInstall(update, stagedAppURL: stagedURL)
+            self.showToast(L10n.t("Atualização pronta para instalar!", "Update ready to install!"))
+        } catch {
+            self.updateStatus = .failed(error.localizedDescription)
+            self.showToast(error.localizedDescription, isError: true)
+        }
+    }
+
+    public func applyUpdateAndRestart(updater: AppUpdater = .shared, installer: ((URL) throws -> Void)? = nil) {
+        guard case .readyToInstall(_, let stagedURL) = updateStatus else { return }
+        updateStatus = .installing
+        do {
+            if let customInstaller = installer {
+                try customInstaller(stagedURL)
+            } else {
+                try updater.installAndRelaunch(stagedAppURL: stagedURL)
+            }
+        } catch {
+            updateStatus = .failed(error.localizedDescription)
+            showToast(error.localizedDescription, isError: true)
+        }
+    }
+
+    public func dismissUpdateBanner() {
+        isDismissedUpdateBanner = true
     }
 
     // MARK: - Toasts

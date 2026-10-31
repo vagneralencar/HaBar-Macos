@@ -176,4 +176,59 @@ final class StoreTests: XCTestCase {
         store.applyOpeningRoomPreference()
         XCTAssertEqual(store.selectedRoom.id, HARoom.escritorio.id)
     }
+
+    func testInAppUpdateWorkflow() async {
+        AppInfo.versionOverride = "1.0.0"
+        defer { AppInfo.versionOverride = nil }
+
+        let mockAPI = MockHomeAssistantAPI()
+        let suiteName = "test_updater_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
+
+        let mockRelease = ReleaseInfo(
+            version: "9.9.9",
+            url: URL(string: "https://github.com/vagneralencar/HaBar-Macos/releases/tag/v9.9.9")!,
+            downloadURL: URL(string: "https://github.com/vagneralencar/HaBar-Macos/releases/download/v9.9.9/HaBar.zip")!,
+            body: "Super update",
+            assetSize: 1024,
+            sha256: "testsha"
+        )
+
+        // 1. Check for update
+        await store.checkForUpdates(userInitiated: true, fetcher: { mockRelease })
+        XCTAssertEqual(store.availableUpdate?.version, "9.9.9")
+        if case .available(let rel) = store.updateStatus {
+            XCTAssertEqual(rel.version, "9.9.9")
+        } else {
+            XCTFail("Expected status to be available")
+        }
+
+        // 2. Start download
+        let dummyStagedURL = URL(fileURLWithPath: "/tmp/dummy_HaBar.app")
+        await store.startInAppUpdate(downloader: { release, progressHandler in
+            progressHandler(0.5, 512, 1024)
+            progressHandler(1.0, 1024, 1024)
+            return dummyStagedURL
+        })
+
+        if case .readyToInstall(let rel, let url) = store.updateStatus {
+            XCTAssertEqual(rel.version, "9.9.9")
+            XCTAssertEqual(url, dummyStagedURL)
+        } else {
+            XCTFail("Expected status to be readyToInstall")
+        }
+
+        // 3. Apply update & restart
+        var installedURL: URL?
+        store.applyUpdateAndRestart(installer: { url in
+            installedURL = url
+        })
+        XCTAssertEqual(installedURL, dummyStagedURL)
+        XCTAssertEqual(store.updateStatus, .installing)
+
+        // 4. Dismiss banner
+        store.dismissUpdateBanner()
+        XCTAssertTrue(store.isDismissedUpdateBanner)
+    }
 }
