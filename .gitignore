@@ -9,6 +9,7 @@ xcuserdata/
 # Built App Bundles & Release Archives
 *.app/
 *.zip
+*.sha256
 
 # macOS System Files
 .DS_Store
