@@ -10,14 +10,23 @@ import Combine
     var commandError: HAAPIError?
     var commands: [(String, String, [String: Any])] = []
     var socketConnections = 0
-    var commandDelay: UInt64 = 0
+    var holdNextCommand = false
+    private var heldCommand: CheckedContinuation<Void, Never>?
+    func resumeHeldCommand() {
+        let continuation = heldCommand
+        heldCommand = nil
+        continuation?.resume()
+    }
     func fetchAreas(baseURL: String, token: String) async throws -> [[String: Any]] { [] }
     func fetchStates(baseURL: String, token: String) async throws -> [[String: Any]] {
         if let fetchError { throw fetchError }; return snapshots
     }
     func callService(baseURL: String, token: String, domain: String, service: String, payload: [String: Any]) async throws {
         commands.append((domain, service, payload))
-        if commandDelay > 0 { try await Task.sleep(nanoseconds: commandDelay) }
+        if holdNextCommand {
+            holdNextCommand = false
+            await withCheckedContinuation { heldCommand = $0 }
+        }
         if let commandError { throw commandError }
     }
     func testConnection(baseURL: String, token: String) async -> ConnectionTestResult { .unreachable }
@@ -55,6 +64,18 @@ import Combine
     }
     private func settle(_ nanos: UInt64 = 220_000_000) async { try? await Task.sleep(nanoseconds: nanos) }
 
+    private func waitForCommands(_ api: ReliabilityAPI, count: Int, file: StaticString = #filePath, line: UInt = #line) async -> Bool {
+        let deadline = Date().addingTimeInterval(3)
+        while api.commands.count < count, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard api.commands.count >= count else {
+            XCTFail("Timed out waiting for \(count) commands; received \(api.commands.count)", file: file, line: line)
+            return false
+        }
+        return true
+    }
+
     func testOfflineFailureRestoresLastConfirmedState() async {
         let api = ReliabilityAPI(); api.commandError = .uncertain; api.fetchError = .connection
         let store = makeStore(api)
@@ -75,18 +96,22 @@ import Combine
         let api = ReliabilityAPI(); let store = makeStore(api)
         store.setBrightness(for: "light.test", percentage: 70)
         store.setCustomRGB(.ocean, for: "light.test")
-        await settle()
+        guard await waitForCommands(api, count: 1) else { return }
         XCTAssertEqual(api.commands.count, 1)
         XCTAssertEqual(api.commands.first?.2["brightness_pct"] as? Int, 70)
         XCTAssertEqual(api.commands.first?.2["rgb_color"] as? [Int], RGBColor.ocean.jsonArray)
     }
     func testInFlightBrightnessCompletesBeforePowerOff() async {
-        let api = ReliabilityAPI(); api.commandDelay = 100_000_000
+        let api = ReliabilityAPI(); api.holdNextCommand = true
+        defer { api.resumeHeldCommand() }
         let store = makeStore(api)
         store.setBrightness(for: "light.test", percentage: 50)
-        await settle(140_000_000)
+        guard await waitForCommands(api, count: 1) else { return }
         store.turnOffAllLights()
-        await settle(350_000_000)
+        await Task.yield()
+        XCTAssertEqual(api.commands.map { $0.1 }, ["turn_on"], "Power-off must wait while brightness is in flight")
+        api.resumeHeldCommand()
+        guard await waitForCommands(api, count: 2) else { return }
         XCTAssertEqual(api.commands.map { $0.1 }, ["turn_on", "turn_off"])
     }
     func testUnknownLockAndDoorAreNotPresentedAsSecure() throws {
