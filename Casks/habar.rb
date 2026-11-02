@@ -1,6 +1,6 @@
 cask "habar" do
-  version "1.7.1"
-  sha256 "c1564aa3660181cf15e60ffb2f8dcc40cebd228dc3735a05e13915c2798a9919"
+  version "1.8.1"
+  sha256 "59d59eb7e1f02691ec19df848429eb82df6a537a0b8bca519db5d7d8bb4d1f6f"
 
   url "https://github.com/vagneralencar/HaBar-Macos/releases/download/v#{version}/HaBar.zip"
   name "HaBar"
