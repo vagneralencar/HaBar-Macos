@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 import Network
+import Carbon
 
 @main
 @MainActor
@@ -10,10 +11,34 @@ public enum HaBarApp {
 
     public static func main() {
         let args = CommandLine.arguments
+        if args.contains("--verify-update") {
+            // Read-only release smoke test: no HA credentials, no replacement or relaunch.
+            AppInfo.versionOverride = "dev"
+            Task { @MainActor in
+                do {
+                    guard let release = await UpdateChecker.fetchLatestRelease() else { throw AppUpdaterError.noDownloadURL }
+                    let staged = try await AppUpdater.shared.downloadAndStageUpdate(release: release)
+                    try FileManager.default.removeItem(at: staged.deletingLastPathComponent().deletingLastPathComponent())
+                    print("Verified release \(release.version): publisher signature, archive, bundle and architecture")
+                    exit(0)
+                } catch {
+                    FileHandle.standardError.write(Data("Update verification failed: \(error.localizedDescription)\n".utf8))
+                    exit(1)
+                }
+            }
+            RunLoop.main.run()
+            return
+        }
         if let idx = args.firstIndex(of: "--export-screenshots"), idx + 1 < args.count {
             let outDir = args[idx + 1]
-            ScreenshotExporter.exportAll(to: outDir)
-            exit(0)
+            NSApplication.shared.setActivationPolicy(.prohibited)
+            do {
+                try ScreenshotExporter.exportAll(to: outDir)
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("Screenshot export failed: \(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
         }
 
         let app = NSApplication.shared
@@ -26,14 +51,15 @@ public enum HaBarApp {
 }
 
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private let store = HomeAssistantStore()
     private var cancellables = Set<AnyCancellable>()
     private var eventMonitor: Any?
-    private var globalKeyMonitor: Any?
-    private var localKeyMonitor: Any?
+    private var registeredHotkey: EventHotKeyRef?
+    private var hotkeyHandler: EventHandlerRef?
+    private var settingsWindow: NSWindow?
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "habar.network.monitor")
 
@@ -55,8 +81,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     public func applicationWillTerminate(_ notification: Notification) {
         networkMonitor.cancel()
-        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
-        if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
+        if let registeredHotkey { UnregisterEventHotKey(registeredHotkey) }
+        if let hotkeyHandler { RemoveEventHandler(hotkeyHandler) }
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
     }
 
@@ -69,7 +95,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         popover.delegate = self
         popover.behavior = .transient
         popover.animates = true
-        popover.appearance = NSAppearance(named: .darkAqua)
+
     }
 
     private func setupStatusItem() {
@@ -84,6 +110,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     private func observeStoreChanges() {
+        store.$isShowingSettings.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] visible in
+            guard let self else { return }
+            if visible { self.showSettingsWindow() } else { self.settingsWindow?.close() }
+        }.store(in: &cancellables)
+        store.$hotKeyEnabled.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] _ in self?.registerHotkey() }.store(in: &cancellables)
+        store.$language.receive(on: RunLoop.main).sink { [weak self] _ in
+            guard let self else { return }
+            self.updateStatusButton(status: self.store.connectionStatus, mode: self.store.menuBarDisplayMode)
+            self.settingsWindow?.title = L10n.t("Ajustes — HaBar", "Settings — HaBar")
+        }.store(in: &cancellables)
         Publishers.CombineLatest3(
             store.$devices,
             store.$connectionStatus.removeDuplicates(),
@@ -106,19 +142,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         switch status {
         case .connected(let host):
             symbolName = "house.fill"
-            tooltip = "HaBar — Conectado a \(host)"
+            tooltip = L10n.t("HaBar — Conectado a \(host)", "HaBar — Connected to \(host)")
         case .demoMode(let host):
             symbolName = "house.fill"
-            tooltip = "HaBar — Modo Demo (\(host))"
+            tooltip = L10n.t("HaBar — Modo Demo (\(host))", "HaBar — Demo mode (\(host))")
         case .connecting:
             symbolName = "house"
-            tooltip = "HaBar — Conectando ao Home Assistant…"
+            tooltip = L10n.t("HaBar — Conectando ao Home Assistant…", "HaBar — Connecting to Home Assistant…")
         case .reconnecting:
             symbolName = "house.slash.fill"
-            tooltip = "HaBar — Sem conexão • Reconectando…"
-        case .unauthorized:
+            tooltip = L10n.t("HaBar — Sem conexão • Reconectando…", "HaBar — Offline • Reconnecting…")
+        case .unauthorized, .forbidden:
             symbolName = "exclamationmark.shield.fill"
-            tooltip = "HaBar — Token inválido ou expirado"
+            tooltip = L10n.t("HaBar — Token inválido ou expirado", "HaBar — Invalid or expired token")
         }
 
         let icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: "HaBar")?.withSymbolConfiguration(config)
@@ -134,12 +170,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         case .activeLights:
             title = activeCount > 0 ? " \(activeCount)" : ""
         case .totalPower:
-            title = power > 0 ? " \(Int(power))W" : ""
+            title = store.powerReadingWatts.map { " \(Int($0))W" } ?? " —W"
         case .primaryTemperature:
             if let temp = store.primaryTemperatureCelsius {
                 title = String(format: " %.1f°C", temp)
             } else {
-                title = activeCount > 0 ? " \(activeCount)" : ""
+                title = " —°C"
             }
         case .lightsAndPower:
             if activeCount > 0 && power > 0 {
@@ -206,26 +242,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         menu.addItem(headerItem)
         menu.addItem(NSMenuItem.separator())
 
-        let turnOffItem = NSMenuItem(title: "Apagar Tudo", action: #selector(contextTurnOffAll), keyEquivalent: "")
+        let turnOffItem = NSMenuItem(title: L10n.t("Apagar todas as luzes", "Turn off all lights"), action: #selector(contextTurnOffAll), keyEquivalent: "")
         turnOffItem.target = self
         turnOffItem.isEnabled = store.activeLightsCount > 0
         menu.addItem(turnOffItem)
 
-        let syncItem = NSMenuItem(title: "Sincronizar Agora", action: #selector(contextSyncNow), keyEquivalent: "")
+        let syncItem = NSMenuItem(title: L10n.t("Sincronizar Agora", "Sync now"), action: #selector(contextSyncNow), keyEquivalent: "")
         syncItem.target = self
         menu.addItem(syncItem)
 
-        let settingsItem = NSMenuItem(title: "Ajustes...", action: #selector(contextOpenSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: L10n.t("Ajustes...", "Settings…"), action: #selector(contextOpenSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let browserItem = NSMenuItem(title: "Abrir no Navegador", action: #selector(contextOpenBrowser), keyEquivalent: "")
+        let browserItem = NSMenuItem(title: L10n.t("Abrir no Navegador", "Open in browser"), action: #selector(contextOpenBrowser), keyEquivalent: "")
         browserItem.target = self
         menu.addItem(browserItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        let quitItem = NSMenuItem(title: "Encerrar HaBar", action: #selector(contextQuit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: L10n.t("Encerrar HaBar", "Quit HaBar"), action: #selector(contextQuit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -245,7 +281,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @objc private func contextOpenSettings() {
         store.isShowingSettings = true
-        showPopover()
+        showSettingsWindow()
     }
 
     @objc private func contextOpenBrowser() {
@@ -264,26 +300,47 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     private func setupGlobalHotkey() {
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleHotkeyEvent(event)
-        }
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if self?.handleHotkeyEvent(event) == true {
-                return nil
-            }
-            return event
-        }
+        var specification = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, context in
+            guard let context else { return OSStatus(eventNotHandledErr) }
+            let owner = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in owner.togglePopover(nil) }
+            return noErr
+        }, 1, &specification, Unmanaged.passUnretained(self).toOpaque(), &hotkeyHandler)
+        registerHotkey()
     }
 
-    @discardableResult
-    private func handleHotkeyEvent(_ event: NSEvent) -> Bool {
-        guard store.hotKeyEnabled else { return false }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags == [.command, .option] && event.charactersIgnoringModifiers?.lowercased() == "h" {
-            togglePopover(nil)
-            return true
+    private func registerHotkey() {
+        if let registeredHotkey { UnregisterEventHotKey(registeredHotkey); self.registeredHotkey = nil }
+        guard store.hotKeyEnabled, hotkeyHandler != nil else { return }
+        let result = RegisterEventHotKey(UInt32(kVK_ANSI_H), UInt32(cmdKey | optionKey), EventHotKeyID(signature: 0x48414252, id: 1), GetApplicationEventTarget(), 0, &registeredHotkey)
+        if result != noErr { store.showToast(L10n.t("Atalho indisponível. Verifique se outro aplicativo usa ⌥⌘H.", "Shortcut unavailable. Check whether another app uses ⌥⌘H."), isError: true) }
+    }
+
+    private func showSettingsWindow() {
+        popover.performClose(nil)
+        if settingsWindow == nil {
+            let controller = NSHostingController(rootView: SettingsView(store: store))
+            let window = NSWindow(contentViewController: controller)
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 560, height: 700))
+            window.minSize = NSSize(width: 500, height: 450)
+            window.title = L10n.t("Ajustes — HaBar", "Settings — HaBar")
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.center()
+            settingsWindow = window
         }
-        return false
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        BonjourDiscovery.shared.startBrowsing()
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window === settingsWindow {
+            store.isShowingSettings = false
+            BonjourDiscovery.shared.stopBrowsing()
+        }
     }
 
     private func setupSleepWakeObserver() {
@@ -312,16 +369,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
 @MainActor
 enum ScreenshotExporter {
-    static func exportAll(to directoryPath: String) {
+    static func exportAll(to directoryPath: String) throws {
+        KeychainHelper.isIsolatedForTesting = true
+        L10n.forcedLanguage = "pt"
+        let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Assets/AppIcon.icns")
+        if let icon = NSImage(contentsOf: iconURL) { NSApplication.shared.applicationIconImage = icon }
         let dirURL = URL(fileURLWithPath: directoryPath)
-        try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
 
         let demoStore = HomeAssistantStore.makeScreenshotDemoStore()
 
         let dashboardFrame = PopoverScreenshotFrame {
             MainPopoverView(store: demoStore)
         }
-        renderView(dashboardFrame, to: dirURL.appendingPathComponent("habar-dashboard.png"))
+        try renderView(dashboardFrame, to: dirURL.appendingPathComponent("habar-dashboard.png"))
 
         if let firstLight = demoStore.devices.first {
             demoStore.selectedDeviceForDetail = firstLight
@@ -329,16 +391,38 @@ enum ScreenshotExporter {
         let detailFrame = PopoverScreenshotFrame {
             MainPopoverView(store: demoStore)
         }
-        renderView(detailFrame, to: dirURL.appendingPathComponent("habar-light-detail.png"))
+        try renderView(detailFrame, to: dirURL.appendingPathComponent("habar-light-detail.png"))
+        demoStore.selectedDeviceForDetail = nil
+        demoStore.themeMode = .light
+        demoStore.language = .en
+        try renderView(MainPopoverView(store: demoStore), to: dirURL.appendingPathComponent("habar-dashboard-light-en.png"), scheme: .light)
+        try renderView(SettingsView(store: demoStore).frame(width: 560, height: 700), to: dirURL.appendingPathComponent("habar-settings-light-en.png"), scheme: .light)
+
     }
 
-    private static func renderView<V: View>(_ view: V, to fileURL: URL) {
-        let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
-        renderer.scale = 2.0
-        guard let cgImage = renderer.cgImage else { return }
-        let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-        guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else { return }
-        try? pngData.write(to: fileURL, options: .atomic)
+    private static func renderView<V: View>(_ view: V, to fileURL: URL, scheme: ColorScheme = .dark) throws {
+        // AppKit hosting is required for native scroll views, menus and form controls.
+        let hosting = NSHostingView(rootView: view.environment(\.colorScheme, scheme))
+        let size = hosting.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: size), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFront(nil)
+        defer { window.close() }
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        hosting.layoutSubtreeIfNeeded()
+        hosting.displayIfNeeded()
+        guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
+            throw NSError(domain: "HaBar.Screenshot", code: 1)
+        }
+        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "HaBar.Screenshot", code: 2)
+        }
+        try png.write(to: fileURL, options: .atomic)
     }
 }
 

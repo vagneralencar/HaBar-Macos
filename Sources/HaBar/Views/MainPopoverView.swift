@@ -3,17 +3,13 @@ import SwiftUI
 public struct MainPopoverView: View {
     @ObservedObject public var store: HomeAssistantStore
     @State private var showAllScenes: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @FocusState private var searchFocused: Bool
 
     private static let twoColumnGrid = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10)
-    ]
-
-    private static let fourColumnRoomGrid = [
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6)
     ]
 
     public init(store: HomeAssistantStore) {
@@ -23,28 +19,27 @@ public struct MainPopoverView: View {
     public var body: some View {
         ZStack {
             if store.isScreenshotPreview {
-                Color(red: 0.10, green: 0.10, blue: 0.12)
+                AppTheme.solidBackground
                     .ignoresSafeArea()
             } else {
-                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-                    .ignoresSafeArea()
+                if !reduceTransparency {
+                    VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow).ignoresSafeArea()
+                } else { AppTheme.solidBackground.ignoresSafeArea() }
 
                 AppTheme.popoverBackground
                     .ignoresSafeArea()
             }
 
-            if store.isShowingSettings {
-                SettingsView(store: store)
-                    .padding(16)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else if let detailDevice = store.selectedDeviceForDetail {
-                LightDetailView(store: store, deviceId: detailDevice.id)
-                    .padding(16)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            if let detailDevice = store.selectedDeviceForDetail {
+                ScrollView { LightDetailView(store: store, deviceId: detailDevice.id).padding(16) }
             } else {
-                dashboardContent
-                    .padding(16)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                VStack(spacing: 0) {
+                    headerSection.padding(16)
+                    Divider()
+                    ScrollView { dashboardContent.padding(16) }
+                    Divider()
+                    footerSection.padding(12)
+                }
             }
 
             // Toast overlay
@@ -55,14 +50,14 @@ public struct MainPopoverView: View {
                             .foregroundColor(toast.isError ? AppTheme.dangerRed : AppTheme.greenOnline)
                         Text(toast.text)
                             .font(.system(size: 11.5, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(AppTheme.text)
                         Spacer()
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.black.opacity(0.88))
+                            .fill(AppTheme.solidBackground)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -78,88 +73,25 @@ public struct MainPopoverView: View {
                 .zIndex(200)
             }
 
-            // Confirmation Modal overlay
-            if let confirmation = store.pendingConfirmation {
-                ZStack {
-                    Color.black.opacity(0.60)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            withAnimation { store.pendingConfirmation = nil }
-                        }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.shield.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(AppTheme.amberAccent)
-                            Text(confirmation.title)
-                                .font(.system(size: 13.5, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-
-                        Text(confirmation.message)
-                            .font(.system(size: 11.5, weight: .regular))
-                            .foregroundColor(.white.opacity(0.82))
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        HStack(spacing: 10) {
-                            Button {
-                                withAnimation { store.pendingConfirmation = nil }
-                            } label: {
-                                Text("Cancelar")
-                                    .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.85))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 7)
-                                    .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.08), borderColor: Color.white.opacity(0.12))
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                let act = confirmation.action
-                                withAnimation { store.pendingConfirmation = nil }
-                                act()
-                            } label: {
-                                Text(confirmation.confirmTitle)
-                                    .font(.system(size: 11.5, weight: .bold))
-                                    .foregroundColor(.black)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(AppTheme.amberAccent)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(14)
-                    .frame(width: 310)
-                    .glassCard(cornerRadius: 14, fill: Color(red: 0.14, green: 0.14, blue: 0.16), borderColor: Color.white.opacity(0.20), lineWidth: 1.2)
-                    .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 12)
-                }
-                .transition(.opacity)
-                .zIndex(300)
-            }
         }
-        .frame(width: AppTheme.popoverWidth)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: AppTheme.popoverWidth, height: min(680, max(320, (NSScreen.main?.visibleFrame.height ?? 800) - 70)))
         .preferredColorScheme(store.themeMode.colorScheme)
-        .onExitCommand {
-            if store.isShowingSettings {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                    store.isShowingSettings = false
-                }
-            } else if store.selectedDeviceForDetail != nil {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                    store.selectedDeviceForDetail = nil
-                }
-            } else {
-                NSApp.keyWindow?.performClose(nil)
+        .transaction { if reduceMotion { $0.animation = nil } }
+        .alert(store.pendingConfirmation?.title ?? "", isPresented: Binding(get: { store.pendingConfirmation != nil }, set: { if !$0 { store.pendingConfirmation = nil } })) {
+            if let confirmation = store.pendingConfirmation {
+                Button(L10n.t("Cancelar", "Cancel"), role: .cancel) { store.pendingConfirmation = nil }
+                Button(confirmation.confirmTitle) { store.pendingConfirmation = nil; confirmation.action() }
             }
+        } message: { Text(store.pendingConfirmation?.message ?? "") }
+        .onExitCommand {
+            if store.pendingConfirmation != nil { store.pendingConfirmation = nil }
+            else if store.isSearchVisible { store.isSearchVisible = false; store.searchQuery = "" }
+            else if store.selectedDeviceForDetail != nil { store.selectedDeviceForDetail = nil }
+            else { NSApp.keyWindow?.performClose(nil) }
         }
+        .onChange(of: store.isSearchVisible) { _, visible in searchFocused = visible }
         .onKeyPress(characters: .decimalDigits) { press in
-            guard !store.isShowingSettings && !store.isSearchVisible else { return .ignored }
+            guard store.pendingConfirmation == nil && store.selectedDeviceForDetail == nil && !store.isSearchVisible else { return .ignored }
             if let digit = Int(press.characters), (1...9).contains(digit) {
                 let roomIndex = digit - 1
                 if store.rooms.indices.contains(roomIndex) {
@@ -177,8 +109,19 @@ public struct MainPopoverView: View {
 
     private var dashboardContent: some View {
         VStack(alignment: .leading, spacing: 13) {
-            headerSection
-
+            if !store.hasCredentials {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.t("Demonstração — nenhum dispositivo real é controlado", "Demo — no real devices are controlled")).font(.callout)
+                    Button(L10n.t("Conectar ao Home Assistant", "Connect to Home Assistant")) { store.isShowingSettings = true }
+                }.padding(12).glassCard()
+            }
+            if !store.connectionStatus.isHealthy {
+                HStack {
+                    Text(store.connectionStatus.labelText).font(.callout)
+                    Spacer()
+                    Button(L10n.t("Conectar", "Connect")) { store.isShowingSettings = true }
+                }.padding(10).glassCard()
+            }
             if !store.isDismissedUpdateBanner {
                 switch store.updateStatus {
                 case .available(let update):
@@ -199,16 +142,11 @@ public struct MainPopoverView: View {
             }
 
             Divider()
-                .background(Color.white.opacity(0.09))
+                .background(AppTheme.surface.opacity(0.09))
 
-            scenesSection
             roomTabsSection
             devicesSection
-
-            Divider()
-                .background(Color.white.opacity(0.09))
-
-            footerSection
+            if !store.scenes.isEmpty && !store.isSearchVisible { scenesSection }
         }
     }
 
@@ -226,7 +164,7 @@ public struct MainPopoverView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("HaBar")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppTheme.text)
 
                 HStack(spacing: 6) {
                     let dotColor = store.connectionStatus.isHealthy ? AppTheme.greenOnline : Color.orange
@@ -236,8 +174,10 @@ public struct MainPopoverView: View {
                         .shadow(color: dotColor.opacity(0.8), radius: 4)
 
                     Text(store.connectionStatus.labelText)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(store.connectionStatus.labelText)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.62))
+                        .foregroundColor(AppTheme.text.opacity(0.62))
                 }
             }
 
@@ -246,14 +186,14 @@ public struct MainPopoverView: View {
             HStack(spacing: 8) {
                 CircularIconButton(
                     systemName: "arrow.clockwise",
-                    helpText: "Atualizar estados do Home Assistant"
+                    helpText: L10n.t("Atualizar estados do Home Assistant", "Refresh Home Assistant states")
                 ) {
                     store.connectToHomeAssistant()
                 }
 
                 CircularIconButton(
                     systemName: "gearshape",
-                    helpText: "Configurações do Home Assistant"
+                    helpText: L10n.t("Configurações do Home Assistant", "Home Assistant settings")
                 ) {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
                         store.isShowingSettings = true
@@ -263,7 +203,7 @@ public struct MainPopoverView: View {
                 CircularIconButton(
                     systemName: "magnifyingglass",
                     isHighlighted: store.isSearchVisible,
-                    helpText: "Filtrar dispositivos"
+                    helpText: L10n.t("Filtrar dispositivos", "Search devices")
                 ) {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         store.isSearchVisible.toggle()
@@ -282,11 +222,11 @@ public struct MainPopoverView: View {
                 .foregroundColor(AppTheme.amberAccent)
             Text(L10n.t("HaBar v\(update.version) disponível!", "HaBar v\(update.version) available!"))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white.opacity(0.95))
+                .foregroundColor(AppTheme.text.opacity(0.95))
 
             Spacer()
 
-            if update.downloadURL != nil {
+            if update.downloadURL != nil && AppUpdater.supportsSecureUpdates {
                 Button {
                     Task { await store.startInAppUpdate() }
                 } label: {
@@ -307,7 +247,7 @@ public struct MainPopoverView: View {
             Button {
                 NSWorkspace.shared.open(update.url)
             } label: {
-                Text("Ver ↗")
+                Text(L10n.t("Ver ↗", "View ↗"))
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(AppTheme.amberAccent)
             }
@@ -318,7 +258,7 @@ public struct MainPopoverView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(AppTheme.text.opacity(0.55))
             }
             .buttonStyle(.plain)
         }
@@ -334,7 +274,7 @@ public struct MainPopoverView: View {
                     .foregroundColor(AppTheme.amberAccent)
                 Text(L10n.t("Baixando atualização... \(Int(progress * 100))%", "Downloading update... \(Int(progress * 100))%"))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.95))
+                    .foregroundColor(AppTheme.text.opacity(0.95))
                 Spacer()
             }
 
@@ -353,7 +293,7 @@ public struct MainPopoverView: View {
                 .foregroundColor(.green)
             Text(L10n.t("v\(update.version) pronta para reiniciar!", "v\(update.version) ready to restart!"))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white.opacity(0.95))
+                .foregroundColor(AppTheme.text.opacity(0.95))
 
             Spacer()
 
@@ -384,7 +324,7 @@ public struct MainPopoverView: View {
                 .foregroundColor(.orange)
             Text(L10n.t("Falha ao atualizar.", "Update failed."))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white.opacity(0.95))
+                .foregroundColor(AppTheme.text.opacity(0.95))
 
             Spacer()
 
@@ -404,7 +344,7 @@ public struct MainPopoverView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(AppTheme.text.opacity(0.55))
             }
             .buttonStyle(.plain)
         }
@@ -418,12 +358,13 @@ public struct MainPopoverView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(AppTheme.text.opacity(0.5))
 
                 TextField(L10n.t("Buscar ou comandar (ex: sala 50, apagar tudo)...", "Search or command (e.g. living 50, turn off all)..."), text: $store.searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppTheme.text)
+                    .focused($searchFocused)
                     .onSubmit {
                         if let action = spotlightAction {
                             executeSpotlightAction(action)
@@ -436,7 +377,7 @@ public struct MainPopoverView: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(AppTheme.text.opacity(0.5))
                     }
                     .buttonStyle(.plain)
                 }
@@ -445,11 +386,11 @@ public struct MainPopoverView: View {
             .padding(.vertical, 7)
             .glassCard(
                 cornerRadius: AppTheme.controlCornerRadius,
-                fill: Color.black.opacity(0.32),
-                borderColor: Color.white.opacity(0.12)
+                fill: AppTheme.surface.opacity(0.06),
+                borderColor: AppTheme.surface.opacity(0.12)
             )
 
-            if let action = spotlightAction {
+            ForEach(Array(spotlightActions.enumerated()), id: \.offset) { _, action in
                 Button {
                     executeSpotlightAction(action)
                 } label: {
@@ -458,7 +399,7 @@ public struct MainPopoverView: View {
                             .foregroundColor(AppTheme.amberAccent)
                         Text(action.title)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(AppTheme.text)
                         Spacer()
                     }
                     .padding(.horizontal, 10)
@@ -474,42 +415,37 @@ public struct MainPopoverView: View {
         }
     }
 
-    private var spotlightAction: SpotlightAction? {
-        let q = store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return nil }
-
-        if q == "apagar tudo" || q == "desligar tudo" || q == "off all" || q == "turn off all" {
-            return .turnOffAll
-        }
-
-        if let scene = store.scenes.first(where: { $0.name.lowercased().contains(q) }) {
-            return .runScene(scene)
-        }
-
+    private var spotlightAction: SpotlightAction? { spotlightActions.count == 1 ? spotlightActions.first : nil }
+    private var spotlightActions: [SpotlightAction] {
+        let q = store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        guard !q.isEmpty else { return [] }
+        if ["apagar tudo", "desligar tudo", "off all", "turn off all"].contains(q) { return [.turnOffAll] }
         let parts = q.split(separator: " ")
-        if parts.count >= 2, let lastNum = Double(parts.last!), (0...100).contains(lastNum) {
-            let nameQuery = parts.dropLast().joined(separator: " ")
-            if let dev = store.devices.first(where: { $0.domain == .light && $0.name.lowercased().contains(nameQuery) }) {
-                return .setBrightness(dev, lastNum)
-            }
+        if parts.count >= 2, let value = Double(parts.last!.replacingOccurrences(of: ",", with: ".")), (0...100).contains(value) {
+            let name = parts.dropLast().joined(separator: " ")
+            let lights = store.devices.filter { $0.domain == .light && $0.supportsBrightness && $0.canControl && $0.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).contains(name) }
+            let rooms = store.rooms.filter { $0.id != HARoom.favorites.id && $0.displayName.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).contains(name) }
+            return rooms.map { .roomBrightness($0, value) } + lights.map { .setBrightness($0, value) }
         }
-
-        return nil
+        return store.scenes.filter { $0.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).contains(q) }.map { .runScene($0) }
     }
 
     private enum SpotlightAction {
         case turnOffAll
         case runScene(HASceneItem)
         case setBrightness(HADeviceItem, Double)
+        case roomBrightness(HARoom, Double)
 
         var title: String {
             switch self {
             case .turnOffAll:
-                return L10n.t("Apagar todas as lâmpadas [Enter ↵]", "Turn off all lights [Enter ↵]")
+                return L10n.t("Apagar todas as lâmpadas", "Turn off all lights")
             case .runScene(let scene):
-                return L10n.t("Executar cena: \(scene.name) [Enter ↵]", "Activate scene: \(scene.name) [Enter ↵]")
+                return L10n.t("Executar cena: \(scene.name)", "Activate scene: \(scene.name)")
+            case .roomBrightness(let room, let pct):
+                return L10n.t("Cômodo: \(room.displayName) → \(Int(pct))%", "Room: \(room.displayName) → \(Int(pct))%")
             case .setBrightness(let dev, let pct):
-                return L10n.t("Definir \(dev.name) para \(Int(pct))% [Enter ↵]", "Set \(dev.name) to \(Int(pct))% [Enter ↵]")
+                return L10n.t("Definir \(dev.name) para \(Int(pct))%", "Set \(dev.name) to \(Int(pct))%")
             }
         }
 
@@ -517,6 +453,7 @@ public struct MainPopoverView: View {
             switch self {
             case .turnOffAll: return "lightbulb.slash"
             case .runScene: return "sparkles"
+            case .roomBrightness: return "house.fill"
             case .setBrightness: return "slider.horizontal.3"
             }
         }
@@ -528,6 +465,8 @@ public struct MainPopoverView: View {
             store.requestTurnOffAllLights()
         case .runScene(let scene):
             store.activateScene(scene.id)
+        case .roomBrightness(let room, let pct):
+            for device in store.devices where device.room.id == room.id { store.setBrightness(for: device.id, percentage: pct) }
         case .setBrightness(let dev, let pct):
             store.setBrightness(for: dev.id, percentage: pct)
         }
@@ -541,9 +480,9 @@ public struct MainPopoverView: View {
 
         return VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text("Cenas Rápidas")
+                Text(L10n.t("Cenas Rápidas", "Quick scenes"))
                     .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
+                    .foregroundColor(AppTheme.text.opacity(0.92))
 
                 Spacer()
 
@@ -553,7 +492,7 @@ public struct MainPopoverView: View {
                             showAllScenes.toggle()
                         }
                     } label: {
-                        Text(showAllScenes ? "Mostrar 4" : "Ver todas (\(allScenes.count))")
+                        Text(showAllScenes ? L10n.t("Mostrar 4", "Show 4") : L10n.t("Ver todas (\(allScenes.count))", "Show all (\(allScenes.count))"))
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(AppTheme.amberAccent)
                     }
@@ -566,9 +505,9 @@ public struct MainPopoverView: View {
                             store.requestTurnOffAllLights()
                         }
                     } label: {
-                        Text(L10n.t("• Apagar Tudo", "• Turn Off All"))
+                        Text(L10n.t("Apagar luzes", "Turn off lights"))
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.55))
+                            .foregroundColor(AppTheme.text.opacity(0.55))
                     }
                     .buttonStyle(.plain)
                 }
@@ -576,34 +515,61 @@ public struct MainPopoverView: View {
 
             LazyVGrid(columns: Self.twoColumnGrid, spacing: 8) {
                 ForEach(visibleScenes) { scene in
+                    VStack(alignment: .leading, spacing: 4) {
                     ScenePillCard(scene: scene) {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             store.activateScene(scene.id)
                         }
+                    }
+                    if let status = store.commandStatuses[scene.id] {
+                        Text(status.label).font(.caption).foregroundColor(.secondary)
+                    } else if scene.isActive {
+                        Text(L10n.t("Última executada", "Last activated")).font(.caption).foregroundColor(.secondary)
+                    }
                     }
                 }
             }
         }
     }
 
-    // MARK: - Zero-Scroll Room Selector Grid
+    // MARK: - Room buttons
 
     private var roomTabsSection: some View {
-        LazyVGrid(columns: Self.fourColumnRoomGrid, spacing: 6) {
-            ForEach(store.rooms) { room in
-                RoomPillButton(
-                    room: room,
-                    isSelected: store.selectedRoom.id == room.id,
-                    hasActive: store.hasActiveDevice(in: room),
-                    action: {
-                        withAnimation(.easeInOut(duration: 0.16)) {
-                            store.selectedRoom = room
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L10n.t("Cômodos", "Rooms"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Menu {
+                    Button(L10n.t("Ligar dispositivos: \(store.selectedRoom.displayName)", "Turn on devices: \(store.selectedRoom.displayName)")) { store.setRoomPower(store.selectedRoom, on: true) }
+                    Button(L10n.t("Desligar dispositivos: \(store.selectedRoom.displayName)", "Turn off devices: \(store.selectedRoom.displayName)")) { store.setRoomPower(store.selectedRoom, on: false) }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).frame(width: 28)
+                .accessibilityLabel(L10n.t("Ações de \(store.selectedRoom.displayName)", "Actions for \(store.selectedRoom.displayName)"))
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 8)], spacing: 8) {
+                ForEach(store.rooms) { room in
+                    let selected = room.id == store.selectedRoom.id
+                    Button { store.selectedRoom = room } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: room.iconSystemName).font(.system(size: 12))
+                                .frame(width: 16)
+                            Text(room.displayName).font(.system(size: 12, weight: selected ? .semibold : .medium))
+                                .lineLimit(2).multilineTextAlignment(.leading)
                         }
-                    },
-                    onSetRoomPower: { turnOn in
-                        store.setRoomPower(room, on: turnOn)
+                        .foregroundColor(AppTheme.text)
+                        .padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(selected ? AppTheme.amberAccent.opacity(0.22) : AppTheme.surface.opacity(0.06)))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? AppTheme.amberAccent.opacity(0.75) : AppTheme.surface.opacity(0.12), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 10))
                     }
-                )
+                    .buttonStyle(.plain)
+                    .help(room.displayName)
+                    .accessibilityLabel(room.displayName)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
             }
         }
     }
@@ -617,13 +583,13 @@ public struct MainPopoverView: View {
             HStack {
                 Text(L10n.t("Iluminação & Dispositivos — \(store.selectedRoom.displayName)", "Lighting & Devices — \(store.selectedRoom.displayName)"))
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
+                    .foregroundColor(AppTheme.text.opacity(0.92))
 
                 Spacer()
 
-                Text("\(items.count) \(items.count == 1 ? "item" : "itens")")
+                Text(L10n.t("\(items.count) \(items.count == 1 ? "item" : "itens")", "\(items.count) \(items.count == 1 ? "item" : "items")"))
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(AppTheme.text.opacity(0.45))
             }
 
             if store.isLoading && items.isEmpty {
@@ -632,9 +598,9 @@ public struct MainPopoverView: View {
                     ProgressView()
                         .controlSize(.small)
                         .padding(.trailing, 6)
-                    Text("Carregando dispositivos…")
+                    Text(L10n.t("Carregando dispositivos…", "Loading devices…"))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(AppTheme.text.opacity(0.6))
                     Spacer()
                 }
                 .padding(.vertical, 22)
@@ -642,9 +608,9 @@ public struct MainPopoverView: View {
             } else if items.isEmpty {
                 HStack {
                     Spacer()
-                    Text("Nenhum dispositivo neste cômodo")
+                    Text(store.isSearchVisible ? L10n.t("Nenhum dispositivo encontrado", "No devices found") : L10n.t("Nenhum dispositivo neste cômodo. Use a busca ou escolha outro cômodo.", "No devices in this room. Search or choose another room."))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.45))
+                        .foregroundColor(AppTheme.text.opacity(0.45))
                         .padding(.vertical, 18)
                     Spacer()
                 }
@@ -661,19 +627,13 @@ public struct MainPopoverView: View {
                                 }
                             },
                             onOpenDetail: {
-                                if (device.domain == .light && device.supportsColor) || device.domain == .climate {
-                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                                        store.selectedDeviceForDetail = device
-                                    }
-                                } else {
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        store.requestToggle(device)
-                                    }
-                                }
+                                store.selectedDeviceForDetail = device
                             },
                             onBrightnessChange: { newPct in
                                 store.setBrightness(for: device.id, percentage: newPct)
                             },
+                            commandStatus: store.commandStatuses[device.id],
+                            onRetry: { store.retryCommand(for: device.id) },
                             onToggleFavorite: {
                                 withAnimation {
                                     store.toggleFavorite(device.id)
@@ -689,100 +649,24 @@ public struct MainPopoverView: View {
     private var footerSection: some View {
         HStack(spacing: 5) {
             Spacer()
-            let count = store.activeLightsCount
-            let lightLabel = count == 1 ? "1 dispositivo ligado" : "\(count) dispositivos ligados"
-            Text("\(lightLabel) • \(store.scenes.count) cenas •")
+            let count = store.activeDevicesCount
+            let lightLabel = L10n.t("\(count) dispositivos ativos", "\(count) active devices")
+            Text(lightLabel)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white.opacity(0.55))
+                .foregroundColor(AppTheme.text.opacity(0.55))
                 .lineLimit(1)
 
             Button {
                 store.openHomeAssistantInBrowser()
             } label: {
-                Text("Abrir Home Assistant ↗")
+                Text(L10n.t("Abrir Home Assistant ↗", "Open Home Assistant ↗"))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.78))
+                    .foregroundColor(AppTheme.text.opacity(0.78))
                     .lineLimit(1)
             }
             .buttonStyle(.plain)
             Spacer()
         }
-    }
-}
-
-// MARK: - Room Pill Button (Shows Popover when Abbreviated)
-
-private struct RoomPillButton: View {
-    let room: HARoom
-    let isSelected: Bool
-    let hasActive: Bool
-    let action: () -> Void
-    let onSetRoomPower: (Bool) -> Void
-
-    @State private var isHovered: Bool = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: room.iconSystemName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(
-                        isSelected
-                            ? AppTheme.amberAccent
-                            : (hasActive ? AppTheme.amberAccent.opacity(0.85) : .white.opacity(0.52))
-                    )
-
-                TruncatedTextWithPopover(
-                    room.shortDisplayName,
-                    fullText: room.displayName,
-                    font: .system(size: 11, weight: isSelected ? .semibold : .medium),
-                    foregroundColor: .white.opacity(isSelected ? 1.0 : 0.72),
-                    isParentHovered: isHovered
-                )
-
-                if hasActive && room.id != HARoom.favorites.id {
-                    Circle()
-                        .fill(AppTheme.amberAccent)
-                        .frame(width: 5, height: 5)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .padding(.horizontal, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.18) : Color.white.opacity(0.04))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(
-                        isSelected ? Color.white.opacity(0.28) : Color.white.opacity(0.07),
-                        lineWidth: 1
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                onSetRoomPower(true)
-            } label: {
-                Label(L10n.t("Ligar tudo em \(room.displayName)", "Turn on all in \(room.displayName)"), systemImage: "lightbulb.fill")
-            }
-
-            Button {
-                onSetRoomPower(false)
-            } label: {
-                Label(L10n.t("Desligar tudo em \(room.displayName)", "Turn off all in \(room.displayName)"), systemImage: "lightbulb.slash")
-            }
-        }
-        .onHover { hovering in
-            isHovered = hovering
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(room.displayName)
-        .accessibilityValue(hasActive ? L10n.t("Dispositivos ligados", "Active devices") : L10n.t("Desligado", "Off"))
-        .accessibilityHint(L10n.t("Toque para ver este cômodo.", "Tap to view this room."))
-        .zIndex(isHovered ? 100 : 1)
     }
 }
 
@@ -799,18 +683,18 @@ private struct ScenePillCard: View {
             HStack(spacing: 9) {
                 ZStack {
                     Circle()
-                        .fill(scene.isActive ? Color.white.opacity(0.22) : Color.white.opacity(0.08))
+                        .fill(scene.isActive ? AppTheme.surface.opacity(0.22) : AppTheme.surface.opacity(0.08))
                         .frame(width: 32, height: 32)
 
                     Image(systemName: scene.iconSystemName)
                         .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundColor(scene.isActive ? .white : .white.opacity(0.78))
+                        .foregroundColor(scene.isActive ? .white : AppTheme.text.opacity(0.78))
                 }
 
                 TruncatedTextWithPopover(
                     scene.name,
                     font: .system(size: 12.5, weight: .semibold),
-                    foregroundColor: .white.opacity(scene.isActive ? 1.0 : 0.88),
+                    foregroundColor: AppTheme.text.opacity(scene.isActive ? 1.0 : 0.88),
                     isParentHovered: isHovered
                 )
 
@@ -825,7 +709,7 @@ private struct ScenePillCard: View {
                             .fill(AppTheme.activeSceneFill)
                     } else {
                         RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius, style: .continuous)
-                            .fill(Color.white.opacity(0.06))
+                            .fill(AppTheme.surface.opacity(0.06))
                     }
                 }
             )
@@ -835,7 +719,7 @@ private struct ScenePillCard: View {
                         scene.isActive
                             ? AppTheme.activeSceneBorder
                             : LinearGradient(
-                                colors: [Color.white.opacity(0.10), Color.white.opacity(0.10)],
+                                colors: [AppTheme.surface.opacity(0.10), AppTheme.surface.opacity(0.10)],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             ),
@@ -855,7 +739,7 @@ private struct ScenePillCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L10n.t("Cena \(scene.name)", "Scene \(scene.name)"))
-        .accessibilityValue(scene.isActive ? L10n.t("Ativa", "Active") : L10n.t("Inativa", "Inactive"))
+        .accessibilityValue(scene.isActive ? L10n.t("Última executada", "Last activated") : L10n.t("Executar", "Activate"))
         .accessibilityHint(L10n.t("Toque para ativar esta cena.", "Tap to activate this scene."))
         .zIndex(isHovered ? 100 : 1)
     }
@@ -864,77 +748,73 @@ private struct ScenePillCard: View {
 // MARK: - Device Control Card (Shows Popover when Name is Truncated)
 
 private struct DeviceControlCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let device: HADeviceItem
     let serverURLString: String
     let onToggle: () -> Void
     let onOpenDetail: () -> Void
     let onBrightnessChange: (Double) -> Void
+    let commandStatus: DeviceCommandStatus?
+    let onRetry: () -> Void
     let onToggleFavorite: () -> Void
 
     @State private var isHovered: Bool = false
 
     var body: some View {
         let accent = device.accentColor
-        let hasSlider = (device.domain == .light && device.supportsBrightness && device.isOn)
+        let hasSlider = (device.domain == .light && device.supportsBrightness && device.isOn && device.canControl)
 
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 9) {
                 Button(action: onToggle) {
                     ZStack {
                         Circle()
-                            .fill(device.isOn ? accent.opacity(0.26) : Color.white.opacity(0.08))
+                            .fill(device.isOn ? accent.opacity(0.26) : AppTheme.surface.opacity(0.08))
                             .frame(width: 32, height: 32)
 
                         Image(systemName: device.iconSystemName)
                             .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundColor(device.isOn ? accent : .white.opacity(0.45))
+                            .foregroundColor(device.isOn ? (colorScheme == .light ? AppTheme.text.opacity(0.85) : accent) : AppTheme.text.opacity(0.45))
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(device.isReadOnly)
+                .disabled(!device.canToggle)
+                .accessibilityLabel(L10n.t("Alternar \(device.name)", "Toggle \(device.name)"))
 
                 Button(action: onOpenDetail) {
                     VStack(alignment: .leading, spacing: 2) {
-                        TruncatedTextWithPopover(
-                            device.name,
-                            font: .system(size: 12, weight: .semibold),
-                            foregroundColor: .white.opacity(device.isOn ? 0.98 : 0.82),
-                            isParentHovered: isHovered
-                        )
+                        Text(device.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(AppTheme.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .help(device.name)
 
                         Text(device.formattedStatusLine)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(device.isOn ? accent.opacity(0.95) : .white.opacity(0.45))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
 
-                if device.domain == .switch {
-                    Button(action: onToggle) {
-                        Image(systemName: "power.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(device.isOn ? accent : .white.opacity(0.35))
-                    }
-                    .buttonStyle(.plain)
-                } else if device.domain == .lock {
-                    Button(action: onToggle) {
-                        Image(systemName: device.isOn ? "lock.open.fill" : "lock.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(device.isOn ? AppTheme.amberAccent : AppTheme.greenOnline)
-                    }
-                    .buttonStyle(.plain)
-                } else if (device.domain == .light && device.supportsColor) || device.domain == .climate {
-                    Button(action: onOpenDetail) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.38))
-                    }
-                    .buttonStyle(.plain)
-                }
+                Button(action: onOpenDetail) {
+                    Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
+                }.buttonStyle(.plain)
+                    .accessibilityLabel(L10n.t("Detalhes de \(device.name)", "Details for \(device.name)"))
+
             }
 
+            if let status = commandStatus {
+                HStack(alignment: .top) {
+                    Text(status.label).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    if case .failed = status {
+                        Button(action: onRetry) { Image(systemName: "arrow.clockwise") }
+                            .accessibilityLabel(L10n.t("Revisar e tentar novamente", "Review and retry"))
+                    }
+                }.foregroundColor(.secondary)
+            }
             if hasSlider {
                 TactileSlider(
                     percentage: Binding(
@@ -943,8 +823,7 @@ private struct DeviceControlCard: View {
                     ),
                     fillColor: accent,
                     height: 20,
-                    showPercentageInside: false,
-                    onChanged: onBrightnessChange
+                    showPercentageInside: false
                 )
             }
         }
@@ -952,16 +831,16 @@ private struct DeviceControlCard: View {
         .frame(maxWidth: .infinity, minHeight: hasSlider ? 84 : 56, alignment: .center)
         .glassCard(
             cornerRadius: AppTheme.cardCornerRadius,
-            fill: device.isOn ? accent.opacity(0.14) : Color.white.opacity(0.05),
-            borderColor: device.isOn ? accent.opacity(0.42) : Color.white.opacity(0.09),
+            fill: device.isOn ? accent.opacity(0.14) : AppTheme.surface.opacity(0.05),
+            borderColor: device.isOn ? accent.opacity(0.42) : AppTheme.surface.opacity(0.09),
             lineWidth: 1.1
         )
         .contextMenu {
-            if !device.isReadOnly {
+            if device.canToggle {
                 Button {
                     onToggle()
                 } label: {
-                    Label(device.isOn ? "Desligar" : "Ligar", systemImage: "power")
+                    Label(device.isOn ? L10n.t("Desligar / fechar", "Turn off / close") : L10n.t("Ligar / abrir", "Turn on / open"), systemImage: "power")
                 }
             }
 
@@ -969,7 +848,7 @@ private struct DeviceControlCard: View {
                 onToggleFavorite()
             } label: {
                 Label(
-                    device.isFavorite ? "Remover dos Favoritos" : "Adicionar aos Favoritos",
+                    device.isFavorite ? L10n.t("Remover dos favoritos", "Remove from favorites") : L10n.t("Adicionar aos favoritos", "Add to favorites"),
                     systemImage: device.isFavorite ? "star.slash" : "star.fill"
                 )
             }
@@ -978,7 +857,7 @@ private struct DeviceControlCard: View {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
-                    Label("Ver no Home Assistant", systemImage: "arrow.up.right.square")
+                    Label(L10n.t("Ver no Home Assistant", "View in Home Assistant"), systemImage: "arrow.up.right.square")
                 }
             }
         }

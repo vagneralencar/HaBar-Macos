@@ -1,43 +1,86 @@
 name: Release
-
 on:
   push:
-    tags:
-      - 'v*'
-
+    tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: write
-
+concurrency:
+  group: release
+  cancel-in-progress: false
 jobs:
   release:
-    name: Build and Publish Release
     runs-on: macos-14
-
+    env:
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || true
-
-      - name: Run Unit Tests
-        run: swift test
-
-      - name: Build and Package App
-        run: ./scripts/build_app.sh
-
-      - name: Create ZIP Archive
+      - uses: actions/checkout@v4
+      - name: Validate release configuration
+        env:
+          HABAR_UPDATE_PRIVATE_KEY: ${{ secrets.HABAR_UPDATE_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
+          test "v$(cat VERSION)" = "$RELEASE_TAG"
+          test -n "$HABAR_UPDATE_PRIVATE_KEY" || { echo 'Missing HABAR_UPDATE_PRIVATE_KEY signing secret' >&2; exit 1; }
+      - name: Run tests
+        run: swift test
+      - name: Build universal app
+        env:
+          HABAR_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/build_app.sh
+      - name: Package and sign the exact archive
+        env:
+          HABAR_UPDATE_PRIVATE_KEY: ${{ secrets.HABAR_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
           ditto -c -k --keepParent HaBar.app HaBar.zip
           shasum -a 256 HaBar.zip > HaBar.zip.sha256
-          echo "SHA256: $(cat HaBar.zip.sha256)"
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            HaBar.zip
-            HaBar.zip.sha256
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+          PUBLIC_KEY=$(sed -n 's/.*publicKeyBase64 = "\([^"]*\)".*/\1/p' Sources/HaBar/Support/UpdateTrust.swift)
+          swift scripts/sign_update.swift --sign HaBar.zip "$(cat VERSION)" "$PUBLIC_KEY"
+          python3 scripts/update_cask.py "$(cat VERSION)" HaBar.zip Casks/habar.rb
+          cp Casks/habar.rb habar.rb
+      - name: Upload draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > "$RUNNER_TEMP/is-draft" 2>/dev/null; then
+            test "$(cat "$RUNNER_TEMP/is-draft")" = true || { echo 'Refusing to replace a published release' >&2; exit 1; }
+          else
+            if [ -f "docs/releases/$RELEASE_TAG.md" ]; then
+              gh release create "$RELEASE_TAG" --draft --verify-tag --title "HaBar $RELEASE_TAG" --notes-file "docs/releases/$RELEASE_TAG.md"
+            else
+              gh release create "$RELEASE_TAG" --draft --verify-tag --title "HaBar $RELEASE_TAG" --generate-notes
+            fi
+          fi
+          gh release upload "$RELEASE_TAG" HaBar.zip HaBar.zip.sha256 HaBar.zip.sig habar.rb --clobber
+      - name: Verify uploaded assets and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/published"
+          gh release download "$RELEASE_TAG" --pattern 'HaBar.zip*' --dir "$RUNNER_TEMP/published"
+          cmp HaBar.zip "$RUNNER_TEMP/published/HaBar.zip"
+          PUBLIC_KEY=$(sed -n 's/.*publicKeyBase64 = "\([^"]*\)".*/\1/p' Sources/HaBar/Support/UpdateTrust.swift)
+          swift scripts/sign_update.swift --verify "$RUNNER_TEMP/published/HaBar.zip" "$(cat VERSION)" "$PUBLIC_KEY"
+          RELEASE_ID=$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)
+          SERVER_HASH=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" --jq '.[] | select(.name == "HaBar.zip") | .digest')
+          EXPECTED_HASH="sha256:$(shasum -a 256 HaBar.zip | cut -d ' ' -f1)"
+          test "$SERVER_HASH" = "$EXPECTED_HASH"
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+      - name: Update cask from published bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git restore -- Casks/habar.rb
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 scripts/update_cask.py "${RELEASE_TAG#v}" "$RUNNER_TEMP/published/HaBar.zip" Casks/habar.rb --only-if-newer
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Casks/habar.rb
+          git diff --cached --quiet || git commit -m "chore(cask): update to $RELEASE_TAG"
+          git push origin main

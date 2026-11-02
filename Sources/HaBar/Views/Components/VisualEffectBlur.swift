@@ -18,7 +18,6 @@ public struct VisualEffectBlur: NSViewRepresentable {
         view.material = material
         view.blendingMode = blendingMode
         view.state = .active
-        view.appearance = NSAppearance(named: .darkAqua)
         return view
     }
 

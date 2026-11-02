@@ -2,7 +2,10 @@ import SwiftUI
 
 public enum AppTheme {
     // MARK: - Palette
-    public static let popoverBackground = Color(red: 0.09, green: 0.09, blue: 0.11).opacity(0.72)
+    public static let popoverBackground = Color(nsColor: .windowBackgroundColor).opacity(0.82)
+    public static let text = Color.primary
+    public static let surface = Color.primary
+    public static let solidBackground = Color(nsColor: .windowBackgroundColor)
     public static let amberAccent = Color(red: 0.96, green: 0.70, blue: 0.27)
     public static let cyanClimate = Color(red: 0.20, green: 0.68, blue: 0.90)
     public static let greenOnline = Color(red: 0.19, green: 0.82, blue: 0.35)
@@ -27,7 +30,7 @@ public enum AppTheme {
     )
 
     // MARK: - Layout Constants
-    public static let popoverWidth: CGFloat = 390
+    public static let popoverWidth: CGFloat = 430
     public static let cardCornerRadius: CGFloat = 13
     public static let controlCornerRadius: CGFloat = 9
 }
@@ -56,8 +59,8 @@ public struct GlassCardModifier: ViewModifier {
 public extension View {
     func glassCard(
         cornerRadius: CGFloat = AppTheme.cardCornerRadius,
-        fill: Color = Color.white.opacity(0.05),
-        borderColor: Color = Color.white.opacity(0.09),
+        fill: Color = AppTheme.surface.opacity(0.05),
+        borderColor: Color = AppTheme.surface.opacity(0.09),
         lineWidth: CGFloat = 1.0
     ) -> some View {
         modifier(
@@ -77,8 +80,8 @@ public extension View {
             .padding(9)
             .glassCard(
                 cornerRadius: AppTheme.controlCornerRadius,
-                fill: Color.black.opacity(0.35),
-                borderColor: Color.white.opacity(0.14)
+                fill: AppTheme.surface.opacity(0.06),
+                borderColor: AppTheme.surface.opacity(0.14)
             )
     }
 }
@@ -163,14 +166,14 @@ public struct HoverPopoverBubble: View {
         VStack(alignment: .center, spacing: 0) {
             Text(text)
                 .font(.system(size: 11.5, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(AppTheme.text)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: true)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color(red: 0.16, green: 0.16, blue: 0.20).opacity(0.98))
+                        .fill(AppTheme.solidBackground)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -178,7 +181,7 @@ public struct HoverPopoverBubble: View {
                 )
 
             PopoverArrowTriangle()
-                .fill(Color(red: 0.16, green: 0.16, blue: 0.20).opacity(0.98))
+                .fill(AppTheme.solidBackground)
                 .frame(width: 10, height: 5)
         }
         .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 4)
@@ -220,19 +223,20 @@ public struct CircularIconButton: View {
     public var body: some View {
         Button(action: action) {
             Circle()
-                .fill(isHighlighted ? Color.white.opacity(0.20) : Color.white.opacity(0.08))
+                .fill(isHighlighted ? AppTheme.surface.opacity(0.20) : AppTheme.surface.opacity(0.08))
                 .frame(width: 32, height: 32)
                 .overlay(
                     Image(systemName: systemName)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white.opacity(0.82))
+                        .foregroundColor(AppTheme.text.opacity(0.82))
                 )
                 .overlay(
-                    Circle().stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    Circle().stroke(AppTheme.surface.opacity(0.10), lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
         .help(helpText)
+        .accessibilityLabel(helpText)
     }
 }
 
@@ -240,7 +244,7 @@ public struct NavigationBackButton: View {
     public let label: String
     public let action: () -> Void
 
-    public init(label: String = "Voltar", action: @escaping () -> Void) {
+    public init(label: String = L10n.t("Voltar", "Back"), action: @escaping () -> Void) {
         self.label = label
         self.action = action
     }
@@ -253,7 +257,7 @@ public struct NavigationBackButton: View {
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
             }
-            .foregroundColor(.white.opacity(0.68))
+            .foregroundColor(AppTheme.text.opacity(0.68))
         }
         .buttonStyle(.plain)
     }

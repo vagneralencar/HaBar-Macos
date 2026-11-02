@@ -5,7 +5,6 @@ public struct TactileSlider: View {
     public var fillColor: Color
     public var height: CGFloat = 22
     public var showPercentageInside: Bool = false
-    public var onChanged: (Double) -> Void
 
     @State private var isDragging: Bool = false
 
@@ -13,14 +12,12 @@ public struct TactileSlider: View {
         percentage: Binding<Double>,
         fillColor: Color,
         height: CGFloat = 22,
-        showPercentageInside: Bool = false,
-        onChanged: @escaping (Double) -> Void
+        showPercentageInside: Bool = false
     ) {
         self._percentage = percentage
         self.fillColor = fillColor
         self.height = height
         self.showPercentageInside = showPercentageInside
-        self.onChanged = onChanged
     }
 
     public var body: some View {
@@ -32,7 +29,7 @@ public struct TactileSlider: View {
             ZStack(alignment: .leading) {
                 // Track background
                 Capsule()
-                    .fill(Color.black.opacity(0.38))
+                    .fill(AppTheme.surface.opacity(0.12))
                     .overlay(
                         Capsule()
                             .stroke(Color.white.opacity(0.10), lineWidth: 1)
@@ -71,7 +68,7 @@ public struct TactileSlider: View {
                 // Left sun icon inside track
                 Image(systemName: "sun.max.fill")
                     .font(.system(size: showPercentageInside ? 13 : 10, weight: .semibold))
-                    .foregroundColor(clamped > 12 ? Color.black.opacity(0.65) : Color.white.opacity(0.5))
+                    .foregroundColor(clamped > 12 ? Color.black.opacity(0.65) : AppTheme.text.opacity(0.6))
                     .padding(.leading, showPercentageInside ? 12 : 7)
 
                 // Floating live percentage tooltip when dragging compact slider
@@ -99,7 +96,6 @@ public struct TactileSlider: View {
                         let ratio = min(1.0, max(0.0, value.location.x / width))
                         let newPct = Double(ratio * 100.0)
                         percentage = newPct
-                        onChanged(newPct)
                     }
                     .onEnded { _ in
                         withAnimation(.easeOut(duration: 0.15)) {
@@ -109,6 +105,9 @@ public struct TactileSlider: View {
             )
         }
         .frame(height: height)
+        .focusable()
+        .onKeyPress(.leftArrow) { percentage = max(0, percentage - 1); return .handled }
+        .onKeyPress(.rightArrow) { percentage = min(100, percentage + 1); return .handled }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L10n.t("Brilho", "Brightness"))
         .accessibilityValue("\(Int(percentage.rounded()))%")
@@ -117,11 +116,9 @@ public struct TactileSlider: View {
             case .increment:
                 let newPct = min(100, percentage + 10)
                 percentage = newPct
-                onChanged(newPct)
             case .decrement:
                 let newPct = max(0, percentage - 10)
                 percentage = newPct
-                onChanged(newPct)
             @unknown default:
                 break
             }

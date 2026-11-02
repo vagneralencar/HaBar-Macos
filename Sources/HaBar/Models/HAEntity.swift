@@ -45,7 +45,7 @@ public enum MenuBarDisplayMode: String, Codable, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .activeLights: return L10n.t("Luzes Ativas (ex: 🏠 3)", "Active Lights (e.g. 🏠 3)")
-        case .totalPower: return L10n.t("Potência Consumida (ex: 🏠 350W)", "Power Consumption (e.g. 🏠 350W)")
+        case .totalPower: return L10n.t("Sensor de potência", "Power sensor")
         case .primaryTemperature: return L10n.t("Temperatura do Sensor (ex: 🏠 24°C)", "Sensor Temperature (e.g. 🏠 24°C)")
         case .lightsAndPower: return L10n.t("Luzes & Potência (ex: 🏠 3 • 350W)", "Lights & Power (e.g. 🏠 3 • 350W)")
         case .iconOnly: return L10n.t("Apenas Ícone (🏠)", "Icon Only (🏠)")
@@ -201,6 +201,10 @@ public struct ScriptCommand: Equatable, Sendable {
     }
 }
 
+public enum HAAvailability: String, Sendable {
+    case available, unavailable, unknown
+}
+
 public struct HADeviceItem: Identifiable, Equatable, Sendable {
     public let id: String
     public var name: String
@@ -230,6 +234,45 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
     public var isAssumedState: Bool = false
     public var deviceClass: String? = nil
     public var coverPosition: Int? = nil
+    public var rawState: String = "off"
+    public var updatedAt: Date? = nil
+    public var availability: HAAvailability = .available
+    public var isTransitioning: Bool { ["locking", "unlocking", "opening", "closing"].contains(rawState) }
+    public var canControl: Bool { availability == .available && !isReadOnly && !isTransitioning }
+    public var supportsRGB: Bool = false
+    public var supportsColorTemperature: Bool = false
+    public var minKelvin: Int = 2000
+    public var maxKelvin: Int = 6500
+    public var temperatureUnit: String = "°C"
+    public var temperatureStep: Double = 1
+    public var sensorValue: Double? = nil
+    public var sensorUnit: String = ""
+    public var memberEntityIds: [String] = []
+    public var supportedFeatures: Int = 0
+    public var reportedFeatures: Int? = nil
+    public var mediaAttributes: [String: String] = [:]
+    public var canToggle: Bool {
+        guard canControl else { return false }
+        guard let features = reportedFeatures else { return true }
+        switch domain {
+        case .cover: return features & (isOn ? 2 : 1) != 0
+        case .mediaPlayer: return features & (isOn ? 256 : 128) != 0
+        case .climate: return hvacModes.contains(isOn ? "off" : (hvacModes.first { $0 != "off" } ?? ""))
+        default: return true
+        }
+    }
+    public var temperatureLabel: String {
+        guard let targetTemperature else { return "—" }
+        return targetTemperature.formatted(.number.precision(.fractionLength(0...1))) + " " + temperatureUnit
+    }
+    public var temperatureCelsius: Double? {
+        guard availability == .available, deviceClass == "temperature", let value = sensorValue else { return nil }
+        switch sensorUnit { case "°C", "C": return value; case "°F", "F": return (value - 32) * 5 / 9; case "K": return value - 273.15; default: return nil }
+    }
+    public var measuredWatts: Double? {
+        guard availability == .available, deviceClass == "power", let value = sensorValue else { return nil }
+        switch sensorUnit { case "W": return value; case "kW": return value * 1000; default: return nil }
+    }
 
     public var isReadOnly: Bool { domain.isReadOnly }
 
@@ -272,6 +315,19 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
     }
 
     public var formattedStatusLine: String {
+        switch availability {
+        case .unavailable: return L10n.t("Indisponível", "Unavailable")
+        case .unknown: return L10n.t("Estado desconhecido", "Unknown state")
+        case .available: break
+        }
+        if isTransitioning {
+            switch rawState {
+            case "locking": return L10n.t("Trancando…", "Locking…")
+            case "unlocking": return L10n.t("Destrancando…", "Unlocking…")
+            case "opening": return L10n.t("Abrindo…", "Opening…")
+            default: return L10n.t("Fechando…", "Closing…")
+            }
+        }
         let baseLine: String
         switch domain {
         case .climate:
@@ -285,12 +341,13 @@ public struct HADeviceItem: Identifiable, Equatable, Sendable {
             if let position = coverPosition, isOn { return L10n.t("Aberta • \(position)%", "Open • \(position)%") }
             return isOn ? L10n.t("Aberta", "Open") : L10n.t("Fechada", "Closed")
         case .sensor, .binarySensor:
+            if domain == .binarySensor { return HAEntityMapper.binarySensorStatus(deviceClass ?? "", isOn: isOn) }
             return statusSubtitle ?? "—"
         case .mediaPlayer:
             let isTV = (deviceClass == "tv") || id.contains("tv") || name.lowercased().contains("tv") || name.lowercased().contains("fire") || name.lowercased().contains("stick")
             let defaultOn = isTV ? L10n.t("Ligada", "On") : L10n.t("Ligado", "On")
             let defaultOff = isTV ? L10n.t("Desligada", "Off") : L10n.t("Desligado", "Off")
-            baseLine = statusSubtitle ?? (isOn ? defaultOn : defaultOff)
+            baseLine = HAEntityMapper.mediaStatus(state: rawState, attrs: mediaAttributes, isTV: isTV) ?? (isOn ? defaultOn : defaultOff)
         case .light where supportsBrightness:
             baseLine = isOn ? L10n.t("Ligado • \(Int(brightnessPct.rounded()))%", "On • \(Int(brightnessPct.rounded()))%") : L10n.t("Desligado", "Off")
         default:
@@ -361,17 +418,20 @@ public enum HAEntityMapper {
         scriptCommands: [ScriptCommand] = KeychainHelper.scriptCommands,
         ignoredSuffixes: [String] = KeychainHelper.ignoredEntitySuffixes,
         stripScenePrefixes: [String] = KeychainHelper.stripScenePrefixes,
-        now: Date = Date()
+        now: Date = Date(),
+        temperatureUnit: String = "°C",
+        rooms: [HARoom] = []
     ) -> (devices: [HADeviceItem], scenes: [HASceneItem]) {
         var devices: [HADeviceItem] = []
         var scenes: [HASceneItem] = []
         let commandsById = Dictionary(scriptCommands.map { ($0.entityId, $0) }, uniquingKeysWith: { first, _ in first })
+        let roomCandidates = Array(Set(rooms + Array(entityToRoom.values))).filter { $0.id != HARoom.favorites.id && $0.id != HARoom.unassigned.id }
 
         for stateObj in states {
             guard let entityId = stateObj["entity_id"] as? String,
                   let state = stateObj["state"] as? String else { continue }
 
-            if state == "unavailable" || ignoredSuffixes.contains(where: { entityId.hasSuffix($0) }) {
+            if ignoredSuffixes.contains(where: { entityId.hasSuffix($0) }) {
                 continue
             }
 
@@ -386,23 +446,22 @@ public enum HAEntityMapper {
                 entityId: entityId,
                 name: friendlyName(entityId: entityId, attrs: attrs),
                 entityToRoom: entityToRoom,
-                scriptRoomId: commandsById[entityId]?.roomId
+                scriptRoomId: commandsById[entityId]?.roomId,
+                roomCandidates: roomCandidates
             )
             guard var device = makeDevice(entityId: entityId, state: state, attrs: attrs, room: room, scriptCommand: commandsById[entityId]) else {
                 continue
             }
 
+            if device.domain == .climate && attrs["temperature_unit"] == nil { device.temperatureUnit = temperatureUnit }
+            if let stamp = stateObj["last_updated"] as? String { device.updatedAt = parseTimestamp(stamp) }
             // Read-only sensors flood the UI unless the user placed them in a room.
             if device.isReadOnly {
-                guard entityToRoom[entityId] != nil else { continue }
                 device.isFavorite = false
             }
             devices.append(device)
         }
 
-        // A native climate entity makes IR helper scripts for the same room redundant.
-        let climateRoomIds = Set(devices.filter { $0.domain == .climate }.map { $0.room.id })
-        devices.removeAll { $0.domain == .script && climateRoomIds.contains($0.room.id) }
 
         scenes.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         devices.sort(by: deviceOrdering)
@@ -414,15 +473,15 @@ public enum HAEntityMapper {
         guard let state = stateObj["state"] as? String else { return }
         let attrs = stateObj["attributes"] as? [String: Any] ?? [:]
 
-        if item.domain == .script {
-            item.isOn = (state == "on")
-            return
-        }
         guard var fresh = makeDevice(entityId: item.id, state: state, attrs: attrs, room: item.room, scriptCommand: nil) else { return }
 
+        if let stamp = stateObj["last_updated"] as? String {
+            fresh.updatedAt = parseTimestamp(stamp)
+            if let old = item.updatedAt, let new = fresh.updatedAt, new < old { return }
+        }
+        if fresh.domain == .climate && attrs["temperature_unit"] == nil { fresh.temperatureUnit = item.temperatureUnit }
         fresh.isFavorite = item.isFavorite
-        fresh.activePresetId = item.activePresetId
-        fresh.name = item.name
+        fresh.activePresetId = (fresh.rgbColor == item.rgbColor && fresh.colorTempKelvin == item.colorTempKelvin) ? item.activePresetId : nil
         // Off lights report no brightness/color: remember the last values so turning them on restores them.
         if fresh.domain == .light && !fresh.isOn {
             fresh.brightnessPct = item.brightnessPct
@@ -455,6 +514,21 @@ public enum HAEntityMapper {
         room: HARoom,
         scriptCommand: ScriptCommand?
     ) -> HADeviceItem? {
+        guard var device = buildDevice(entityId: entityId, state: state, attrs: attrs, room: room, scriptCommand: scriptCommand) else { return nil }
+        device.rawState = state
+        device.deviceClass = attrs["device_class"] as? String ?? device.deviceClass
+        if let stamp = attrs["last_updated"] as? String { device.updatedAt = parseTimestamp(stamp) }
+        device.availability = state == "unavailable" ? .unavailable : (["unknown", "jammed"].contains(state) ? .unknown : .available)
+        device.supportedFeatures = (attrs["supported_features"] as? Int) ?? 0
+        device.reportedFeatures = attrs["supported_features"] as? Int
+        device.mediaAttributes = attrs.compactMapValues { $0 as? String }
+        device.memberEntityIds = attrs["entity_id"] as? [String] ?? []
+        device.sensorValue = Double(state).flatMap { $0.isFinite ? $0 : nil }
+        device.sensorUnit = attrs["unit_of_measurement"] as? String ?? ""
+        return device
+    }
+
+    private static func buildDevice(entityId: String, state: String, attrs: [String: Any], room: HARoom, scriptCommand: ScriptCommand?) -> HADeviceItem? {
         let name = friendlyName(entityId: entityId, attrs: attrs)
         let domainPrefix = entityId.split(separator: ".").first.map(String.init) ?? ""
 
@@ -463,7 +537,6 @@ public enum HAEntityMapper {
             return makeLight(entityId: entityId, name: name, state: state, attrs: attrs, room: room)
         case "switch":
             var device = HADeviceItem(id: entityId, name: name, domain: .switch, room: room, icon: iconForSwitch(name: name), isOn: state == "on")
-            device.statusSubtitle = L10n.t("Ligado", "On")
             device.powerWatts = extractPowerWatts(from: attrs)
             return device
         case "fan":
@@ -503,8 +576,9 @@ public enum HAEntityMapper {
             device.statusSubtitle = binarySensorStatus(deviceClass, isOn: isOn)
             return device
         case "script":
-            guard let command = scriptCommand else { return nil }
-            return HADeviceItem(id: entityId, name: command.name, domain: .script, room: room, icon: command.icon, isOn: state == "on")
+            var device = HADeviceItem(id: entityId, name: scriptCommand?.name ?? name, domain: .script, room: room, icon: scriptCommand?.icon ?? "play.fill", isOn: state == "on")
+            device.isFavorite = false
+            return device
         default:
             return nil
         }
@@ -522,7 +596,7 @@ public enum HAEntityMapper {
         let isGroup = (attrs["entity_id"] as? [String]) != nil
         let isBacklight = entityId.contains("luz_de_fundo") || entityId.contains("backlight")
 
-        return HADeviceItem(
+        var light = HADeviceItem(
             id: entityId,
             name: name,
             domain: .light,
@@ -531,7 +605,7 @@ public enum HAEntityMapper {
             isOn: isOn,
             supportsBrightness: supportsBrightness,
             supportsColor: supportsColor,
-            brightnessPct: isOn ? max(pct, 5) : 0,
+            brightnessPct: isOn ? pct : 0,
             rgbColor: extractRGB(from: attrs) ?? .warmWhite,
             colorTempKelvin: (attrs["color_temp_kelvin"] as? Double).map { Int($0) } ?? (attrs["color_temp_kelvin"] as? Int),
             activePresetId: nil,
@@ -541,6 +615,11 @@ public enum HAEntityMapper {
             statusSubtitle: nil,
             powerWatts: extractPowerWatts(from: attrs)
         )
+        light.supportsRGB = colorModes.contains { ["hs", "rgb", "rgbw", "rgbww", "xy"].contains($0) }
+        light.supportsColorTemperature = colorModes.contains("color_temp")
+        light.minKelvin = (attrs["min_color_temp_kelvin"] as? Int) ?? 2000
+        light.maxKelvin = max(light.minKelvin, (attrs["max_color_temp_kelvin"] as? Int) ?? 6500)
+        return light
     }
 
     private static func makeClimate(entityId: String, name: String, state: String, attrs: [String: Any], room: HARoom) -> HADeviceItem {
@@ -553,6 +632,8 @@ public enum HAEntityMapper {
             iconSystemName: "air.conditioner.horizontal.fill", statusSubtitle: nil, powerWatts: nil
         )
         climate.targetTemperature = attrs["temperature"] as? Double
+        climate.temperatureUnit = attrs["temperature_unit"] as? String ?? "°C"
+        climate.temperatureStep = max(0.1, (attrs["target_temp_step"] as? Double) ?? 1)
         climate.minTemperature = attrs["min_temp"] as? Double ?? 16
         climate.maxTemperature = attrs["max_temp"] as? Double ?? 30
         climate.hvacMode = state
@@ -574,41 +655,25 @@ public enum HAEntityMapper {
         return a.name.localizedStandardCompare(b.name) == .orderedAscending
     }
 
-    public static func inferRoom(from text: String) -> HARoom {
-        let lower = text.lowercased()
-        if lower.contains("escritorio") || lower.contains("escritório") || lower.contains("office") {
-            return .escritorio
-        }
-        if lower.contains("quarto") || lower.contains("abajur") || lower.contains("bedroom") {
-            return .quarto
-        }
-        if lower.contains("cozinha") || lower.contains("kitchen") {
-            return .cozinha
-        }
-        if lower.contains("serviço") || lower.contains("servico") || lower.contains("laundry") {
-            return .areaServico
-        }
-        if lower.contains("tv") {
-            return .salaTV
-        }
-        if lower.contains("jantar") || lower.contains("dining") {
-            return .salaJantar
-        }
-        return .unassigned
-    }
-
-    private static func resolveRoom(entityId: String, name: String, entityToRoom: [String: HARoom], scriptRoomId: String?) -> HARoom {
+    private static func resolveRoom(entityId: String, name: String, entityToRoom: [String: HARoom], scriptRoomId: String?, roomCandidates: [HARoom]) -> HARoom {
+        // An explicitly registered HA area always wins over local naming conventions.
         if let room = entityToRoom[entityId] { return room }
-        if let scriptRoomId {
-            if let room = Set(entityToRoom.values).first(where: { $0.id == scriptRoomId }) ?? HARoom.defaultRooms.first(where: { $0.id == scriptRoomId }) {
-                return room
+        if let scriptRoomId, let room = roomCandidates.first(where: { $0.id == scriptRoomId }) { return room }
+        // Virtual climate entities and IR scripts often have no registry area. Match whole
+        // room names/IDs only, and leave ambiguous matches unassigned.
+        guard entityId.hasPrefix("climate.") || entityId.hasPrefix("script.") else { return .unassigned }
+        func words(_ value: String) -> String {
+            value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: " ")
+        }
+        let labels = [entityId, name].map { " " + words($0) + " " }
+        let matches = roomCandidates.filter { room in
+            [room.id, room.name].contains { alias in
+                let normalized = words(alias)
+                return !normalized.isEmpty && labels.contains { $0.contains(" " + normalized + " ") }
             }
         }
-        let inferred = inferRoom(from: "\(entityId) \(name)")
-        if inferred != .unassigned {
-            return inferred
-        }
-        return .unassigned
+        return matches.count == 1 ? matches[0] : .unassigned
     }
 
     private static func friendlyName(entityId: String, attrs: [String: Any]) -> String {
@@ -685,7 +750,7 @@ public enum HAEntityMapper {
         return "play.rectangle.fill"
     }
 
-    private static func mediaStatus(state: String, attrs: [String: Any], isTV: Bool) -> String? {
+    static func mediaStatus(state: String, attrs: [String: Any], isTV: Bool) -> String? {
         let appName = (attrs["app_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let source = (attrs["source"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let mediaTitle = (attrs["media_title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -755,7 +820,7 @@ public enum HAEntityMapper {
         }
     }
 
-    private static func binarySensorStatus(_ deviceClass: String, isOn: Bool) -> String {
+    static func binarySensorStatus(_ deviceClass: String, isOn: Bool) -> String {
         switch deviceClass {
         case "motion", "occupancy":
             return isOn ? L10n.t("Movimento", "Motion") : L10n.t("Sem movimento", "Clear")
@@ -832,7 +897,11 @@ extension HADeviceItem {
                 activeEffect: "off", availableEffects: ["Scene", "Music", "off"],
                 iconSystemName: "bed.double.fill", statusSubtitle: nil, powerWatts: nil
             )
-        ]
+        ].map { item in
+            var copy = item
+            if item.supportsColor { copy.supportsRGB = true; copy.supportsColorTemperature = true }
+            return copy
+        }
     }
 }
 

@@ -8,17 +8,17 @@ final class MockHomeAssistantAPI: HomeAssistantAPI {
     var lastServiceCall: (domain: String, service: String, payload: [String: Any])?
     var statesToReturn: [[String: Any]] = []
 
-    func fetchAreas(baseURL: String, token: String) async -> [[String: Any]]? {
+    func fetchAreas(baseURL: String, token: String) async throws -> [[String: Any]] {
         []
     }
 
-    func fetchStates(baseURL: String, token: String) async -> [[String: Any]]? {
+    func fetchStates(baseURL: String, token: String) async throws -> [[String: Any]] {
         statesToReturn
     }
 
-    func callService(baseURL: String, token: String, domain: String, service: String, payload: [String: Any]) async -> Bool {
+    func callService(baseURL: String, token: String, domain: String, service: String, payload: [String: Any]) async throws {
         lastServiceCall = (domain, service, payload)
-        return serviceCallReturnValue
+        if !serviceCallReturnValue { throw HAAPIError.connection }
     }
 
     func testConnection(baseURL: String, token: String) async -> ConnectionTestResult {
@@ -34,6 +34,8 @@ final class StoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         KeychainHelper.isIsolatedForTesting = true
+        KeychainHelper.resetTestingStorage()
+        L10n.forcedLanguage = "pt"
     }
 
     override func tearDown() {
@@ -53,6 +55,7 @@ final class StoreTests: XCTestCase {
     func testToggleFavorite() {
         let mockAPI = MockHomeAssistantAPI()
         let defaults = UserDefaults(suiteName: "test_favorites_\(UUID().uuidString)")!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         guard let first = store.devices.first else {
@@ -76,6 +79,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         mockAPI.serviceCallReturnValue = false // simulate network failure
         let defaults = UserDefaults(suiteName: "test_rollback_\(UUID().uuidString)")!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
         store.serverURLString = "http://test.local:8123"
         store.accessToken = "test_token"
@@ -108,6 +112,7 @@ final class StoreTests: XCTestCase {
     func testConfirmationRequestForLocks() async {
         let mockAPI = MockHomeAssistantAPI()
         let defaults = UserDefaults(suiteName: "test_lock_\(UUID().uuidString)")!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
         store.serverURLString = "http://test.local:8123"
         store.accessToken = "test_token"
@@ -120,9 +125,10 @@ final class StoreTests: XCTestCase {
         store.setDevicesForTesting(current)
 
         // Toggling locked lock triggers pending confirmation
+        store.requireBiometricsForSensitiveActions = false
         store.requestToggle(lock)
         XCTAssertNotNil(store.pendingConfirmation)
-        XCTAssertTrue(store.pendingConfirmation?.title.contains("Destrancar") == true)
+        XCTAssertTrue(store.pendingConfirmation?.title.contains("Abrir") == true)
 
         // Executing the confirmation action calls service
         store.pendingConfirmation?.action()
@@ -138,6 +144,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_theme_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         XCTAssertEqual(store.themeMode, .dark)
@@ -152,6 +159,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_lang_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         store.language = .en
@@ -167,6 +175,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_room_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         store.defaultOpeningRoomId = HARoom.escritorio.id
@@ -184,6 +193,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_updater_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         let mockRelease = ReleaseInfo(
@@ -236,6 +246,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_batching_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         guard let firstLight = store.devices.first(where: { $0.domain == .light }) else {
@@ -267,6 +278,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_metrics_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         // Mock devices include switches/lights with power Watts
@@ -294,6 +306,7 @@ final class StoreTests: XCTestCase {
         let mockAPI = MockHomeAssistantAPI()
         let suiteName = "test_turn_off_confirm_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("pt", forKey: "habar.language")
         let store = HomeAssistantStore(client: mockAPI, defaults: defaults, autoConnect: false)
 
         store.confirmTurnOffAll = true
@@ -301,7 +314,7 @@ final class StoreTests: XCTestCase {
 
         if store.activeLightsCount > 0 {
             XCTAssertNotNil(store.pendingConfirmation)
-            XCTAssertEqual(store.pendingConfirmation?.confirmTitle, "Apagar Tudo")
+            XCTAssertEqual(store.pendingConfirmation?.confirmTitle, "Apagar luzes")
         }
     }
 }

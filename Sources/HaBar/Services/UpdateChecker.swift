@@ -7,6 +7,7 @@ public struct ReleaseInfo: Equatable, Sendable {
     public let body: String
     public let assetSize: Int64?
     public let sha256: String?
+    public let signatureURL: URL?
 
     public init(
         version: String,
@@ -14,7 +15,8 @@ public struct ReleaseInfo: Equatable, Sendable {
         downloadURL: URL? = nil,
         body: String = "",
         assetSize: Int64? = nil,
-        sha256: String? = nil
+        sha256: String? = nil,
+        signatureURL: URL? = nil
     ) {
         self.version = version
         self.url = url
@@ -22,6 +24,7 @@ public struct ReleaseInfo: Equatable, Sendable {
         self.body = body
         self.assetSize = assetSize
         self.sha256 = sha256
+        self.signatureURL = signatureURL
     }
 
     public var formattedSize: String? {
@@ -58,10 +61,13 @@ public enum UpdateChecker {
         var downloadURL: URL?
         var assetSize: Int64?
         var sha256: String?
+        var signatureURL: URL?
 
         if let assets = json["assets"] as? [[String: Any]] {
             for asset in assets {
-                guard let name = asset["name"] as? String, name.hasSuffix(".zip") else { continue }
+                guard let name = asset["name"] as? String else { continue }
+                if name == "HaBar.zip.sig", let value = asset["browser_download_url"] as? String { signatureURL = URL(string: value) }
+                guard name == "HaBar.zip" else { continue }
                 if let dlString = asset["browser_download_url"] as? String {
                     downloadURL = URL(string: dlString)
                 }
@@ -71,7 +77,6 @@ public enum UpdateChecker {
                 if let digest = asset["digest"] as? String, digest.hasPrefix("sha256:") {
                     sha256 = String(digest.dropFirst(7))
                 }
-                break
             }
         }
 
@@ -81,7 +86,8 @@ public enum UpdateChecker {
             downloadURL: downloadURL,
             body: body,
             assetSize: assetSize,
-            sha256: sha256
+            sha256: sha256,
+            signatureURL: signatureURL
         )
     }
 

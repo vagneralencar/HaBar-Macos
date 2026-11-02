@@ -1,68 +1,63 @@
 import Foundation
-import Network
 
 public struct DiscoveredServer: Identifiable, Hashable, Sendable {
     public var id: String { urlString }
     public let name: String
     public let urlString: String
-
-    public init(name: String, urlString: String) {
-        self.name = name
-        self.urlString = urlString
-    }
+    public init(name: String, urlString: String) { self.name = name; self.urlString = urlString }
 }
 
-@MainActor
-public final class BonjourDiscovery: ObservableObject {
+@MainActor public final class BonjourDiscovery: NSObject, ObservableObject, NetServiceBrowserDelegate, NetServiceDelegate {
     public static let shared = BonjourDiscovery()
-
     @Published public private(set) var discoveredServers: [DiscoveredServer] = []
-    @Published public private(set) var isSearching: Bool = false
-
-    private var browser: NWBrowser?
-
-    public init() {}
+    @Published public private(set) var isSearching = false
+    @Published public private(set) var errorMessage: String?
+    private var browser: NetServiceBrowser?
+    private var services: [NetService] = []
+    private var resolved: [ObjectIdentifier: DiscoveredServer] = [:]
 
     public func startBrowsing() {
         guard browser == nil else { return }
-        let descriptor = NWBrowser.Descriptor.bonjour(type: "_home-assistant._tcp", domain: "local.")
-        let parameters = NWParameters()
-        parameters.includePeerToPeer = true
-
-        let b = NWBrowser(for: descriptor, using: parameters)
-        self.browser = b
-        self.isSearching = true
-
-        b.browseResultsChangedHandler = { [weak self] results, _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                var servers: [DiscoveredServer] = []
-                for result in results {
-                    if case .service(let name, _, _, _) = result.endpoint {
-                        let cleanName = name.replacingOccurrences(of: "\\", with: "")
-                        // Common fallback host resolution: homeassistant.local or name.local
-                        let url = "http://homeassistant.local:8123"
-                        servers.append(DiscoveredServer(name: cleanName, urlString: url))
-                    }
-                }
-                self.discoveredServers = servers
-            }
-        }
-
-        b.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor [weak self] in
-                if case .failed = state {
-                    self?.isSearching = false
-                }
-            }
-        }
-
-        b.start(queue: DispatchQueue(label: "habar.bonjour.discovery"))
+        let browser = NetServiceBrowser()
+        browser.delegate = self
+        self.browser = browser
+        isSearching = true; errorMessage = nil
+        browser.searchForServices(ofType: "_home-assistant._tcp.", inDomain: "local.")
     }
-
     public func stopBrowsing() {
-        browser?.cancel()
-        browser = nil
-        isSearching = false
+        browser?.stop(); browser = nil
+        services.forEach { $0.stop(); $0.delegate = nil }
+        services = []; resolved = [:]; discoveredServers = []; isSearching = false
+    }
+    nonisolated public func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
+        MainActor.assumeIsolated {
+            services.append(service); service.delegate = self; service.resolve(withTimeout: 8)
+        }
+    }
+    nonisolated public func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
+        MainActor.assumeIsolated {
+            resolved.removeValue(forKey: ObjectIdentifier(service))
+            services.removeAll { $0 == service }; publish()
+        }
+    }
+    nonisolated public func netServiceDidResolveAddress(_ sender: NetService) {
+        MainActor.assumeIsolated {
+            guard services.contains(sender), let host = sender.hostName, sender.port > 0 else { return }
+            var components = URLComponents()
+            components.scheme = "http"; components.host = host; components.port = sender.port
+            if let data = sender.txtRecordData(), let scheme = NetService.dictionary(fromTXTRecord: data)["base_url"].flatMap({ String(data: $0, encoding: .utf8) }).flatMap({ URL(string: $0)?.scheme }), scheme == "https" { components.scheme = scheme }
+            guard let url = components.url else { return }
+            resolved[ObjectIdentifier(sender)] = DiscoveredServer(name: sender.name, urlString: url.absoluteString)
+            publish()
+        }
+    }
+    nonisolated public func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
+        MainActor.assumeIsolated {
+            isSearching = false
+            errorMessage = L10n.t("Não foi possível buscar na rede local. Informe a URL manualmente.", "Couldn't search the local network. Enter the URL manually.")
+        }
+    }
+    private func publish() {
+        discoveredServers = Array(Set(resolved.values)).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

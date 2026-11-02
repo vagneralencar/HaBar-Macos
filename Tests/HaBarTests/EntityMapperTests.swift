@@ -2,6 +2,9 @@ import XCTest
 @testable import HaBar
 
 final class EntityMapperTests: XCTestCase {
+    override func setUp() { KeychainHelper.isIsolatedForTesting = true; L10n.forcedLanguage = "pt" }
+    override func tearDown() { KeychainHelper.isIsolatedForTesting = false; L10n.forcedLanguage = nil }
+
     func testMapCoversFansAndLocks() throws {
         let states: [[String: Any]] = [
             [
@@ -38,7 +41,7 @@ final class EntityMapperTests: XCTestCase {
         XCTAssertFalse(lock.isOn) // locked = not on (closed)
     }
 
-    func testSensorsOnlyIncludedWhenAssignedToRoom() throws {
+    func testSensorsRemainAvailableWithoutAnArea() throws {
         let office = HARoom(id: "escritorio", name: "Escritório")
         let states: [[String: Any]] = [
             [
@@ -62,12 +65,12 @@ final class EntityMapperTests: XCTestCase {
 
         // When not mapped to room, orphan read-only sensors are filtered out to avoid clutter
         let filtered = HAEntityMapper.mapStates(states, entityToRoom: [:])
-        XCTAssertEqual(filtered.devices.count, 0)
+        XCTAssertEqual(filtered.devices.count, 2)
 
         // When placed in room, sensor is mapped with units
         let mapped = HAEntityMapper.mapStates(states, entityToRoom: ["sensor.temperatura_escritorio": office])
-        XCTAssertEqual(mapped.devices.count, 1)
-        let tempSensor = try XCTUnwrap(mapped.devices.first)
+        XCTAssertEqual(mapped.devices.count, 2)
+        let tempSensor = try XCTUnwrap(mapped.devices.first { $0.id == "sensor.temperatura_escritorio" })
         XCTAssertEqual(tempSensor.domain, .sensor)
         XCTAssertTrue(tempSensor.isReadOnly)
         XCTAssertEqual(tempSensor.statusSubtitle, "23.5 °C")

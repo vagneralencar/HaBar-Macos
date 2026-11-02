@@ -1,628 +1,225 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 public struct SettingsView: View {
     @ObservedObject public var store: HomeAssistantStore
     @ObservedObject private var launchManager = LaunchAtLoginManager.shared
     @ObservedObject private var bonjour = BonjourDiscovery.shared
-    @ObservedObject private var auditLogger = AuditLogger.shared
-
-    @State private var urlInput: String = ""
-    @State private var tokenInput: String = ""
-    @State private var showPlainToken: Bool = false
-    @State private var savedBannerVisible: Bool = false
-    @State private var isTestingConnection: Bool = false
-    @State private var testResult: ConnectionTestResult? = nil
-    @State private var isCheckingUpdates: Bool = false
-    @State private var copiedBrew: Bool = false
-    @State private var isShowingAuditLog: Bool = false
+    @ObservedObject private var auditLogger: AuditLogger
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var urlInput = ""
+    @State private var tokenInput = ""
+    @State private var showToken = false
+    @State private var testing = false
+    @State private var result: ConnectionTestResult?
+    @State private var saved = false
+    @State private var showHistory = false
+    @State private var savingError: String?
 
     public init(store: HomeAssistantStore) {
         self.store = store
+        self.auditLogger = store.isScreenshotPreview ? AuditLogger(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("habar-preview-history.json")) : .shared
     }
-
     public var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            // Header
+        VStack(spacing: 0) {
+            Form {
+                connectionSection
+                preferencesSection
+                securitySection
+                updatesSection
+                historySection
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            Divider()
             HStack {
-                NavigationBackButton {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                        store.isShowingSettings = false
-                    }
+                Button { store.openHomeAssistantInBrowser() } label: {
+                    Label(L10n.t("Abrir Home Assistant", "Open Home Assistant"), systemImage: "safari")
                 }
-
                 Spacer()
-
-                Text("Ajustes — HaBar")
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundColor(.white)
-
-                Spacer()
-            }
-
-            // Server URL Section
-            VStack(alignment: .leading, spacing: 5) {
-                Text("URL do Servidor Home Assistant")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.75))
-
-                TextField("http://homeassistant.local:8123", text: $urlInput)
-                    .glassInputField()
-
-                if !bonjour.discoveredServers.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Servidor detectado na rede:")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(.white.opacity(0.55))
-
-                        ForEach(bonjour.discoveredServers) { srv in
-                            Button {
-                                urlInput = srv.urlString
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "network.badge.shield.half.filled")
-                                    Text("\(srv.name) — \(srv.urlString)")
-                                        .lineLimit(1)
-                                }
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(AppTheme.amberAccent)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
-
-            // Access Token Section
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("Long-Lived Access Token")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.75))
-
-                    Spacer()
-
-                    Button {
-                        if let pasted = NSPasteboard.general.string(forType: .string) {
-                            tokenInput = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "doc.on.clipboard")
-                            Text("Colar")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(AppTheme.amberAccent)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        showPlainToken.toggle()
-                    } label: {
-                        Image(systemName: showPlainToken ? "eye.slash" : "eye")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 6)
-                }
-
-                if showPlainToken {
-                    TextField("Cole seu token do Home Assistant...", text: $tokenInput)
-                        .glassInputField()
-                } else {
-                    SecureField("Cole seu token do Home Assistant...", text: $tokenInput)
-                        .glassInputField()
-                }
-            }
-
-            // Test Connection & Save Action Row
-            HStack(spacing: 8) {
-                Button {
-                    Task {
-                        isTestingConnection = true
-                        testResult = nil
-                        let res = await store.testConnection(url: urlInput, token: tokenInput)
-                        withAnimation {
-                            testResult = res
-                            isTestingConnection = false
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        if isTestingConnection {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "network")
-                        }
-                        Text(isTestingConnection ? "Testando…" : "Testar Conexão")
-                    }
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 10)
-                    .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.08), borderColor: Color.white.opacity(0.12))
-                }
-                .buttonStyle(.plain)
-                .disabled(isTestingConnection)
-
-                Button {
-                    store.saveSettingsAndConnect(url: urlInput, token: tokenInput)
-                    withAnimation { savedBannerVisible = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                        withAnimation { savedBannerVisible = false }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                        Text("Salvar & Sincronizar")
-                            .fontWeight(.semibold)
-                    }
-                    .font(.system(size: 11.5))
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(AppTheme.amberAccent)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-
-            // Test Result Banner
-            if let result = testResult {
-                testResultBanner(for: result)
-            }
-
-            if savedBannerVisible {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(AppTheme.greenOnline)
-                    Text("Configurações salvas e sincronização iniciada!")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.85))
-                }
-            }
-
-            Divider()
-                .background(Color.white.opacity(0.08))
-
-            // Preferences
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Preferências")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.75))
-
-                HStack {
-                    Text("Aparência")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                    Spacer()
-                    Picker("", selection: $store.themeMode) {
-                        ForEach(AppThemeMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 195)
-                }
-
-                HStack {
-                    Text(L10n.t("Idioma", "Language"))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                    Spacer()
-                    Picker("", selection: $store.language) {
-                        ForEach(AppLanguage.allCases, id: \.self) { lang in
-                            Text(lang.title).tag(lang)
-                        }
-                    }
-                    .frame(width: 195)
-                }
-
-                HStack {
-                    Text(L10n.t("Cômodo inicial", "Opening room"))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                    Spacer()
-                    Picker("", selection: $store.defaultOpeningRoomId) {
-                        ForEach(store.rooms) { room in
-                            Text(room.displayName).tag(room.id)
-                        }
-                    }
-                    .frame(width: 195)
-                }
-
-                HStack {
-                    Text(L10n.t("Barra de menus", "Menu bar display"))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                    Spacer()
-                    Picker("", selection: $store.menuBarDisplayMode) {
-                        ForEach(MenuBarDisplayMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .frame(width: 195)
-                }
-
-                Toggle(isOn: $store.hotKeyEnabled) {
-                    HStack {
-                        Text(L10n.t("Atalho global no teclado", "Global keyboard shortcut"))
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundColor(.white.opacity(0.9))
-                        Spacer()
-                        Text("⌥⌘H")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.12)))
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                }
-                .toggleStyle(.checkbox)
-
-                Toggle(isOn: Binding(
-                    get: { launchManager.isEnabled },
-                    set: { launchManager.setEnabled($0) }
-                )) {
-                    Text(L10n.t("Iniciar automaticamente com o macOS", "Launch automatically at login"))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                }
-                .toggleStyle(.checkbox)
-
-                Toggle(isOn: $store.autoCheckUpdates) {
-                    Text(L10n.t("Verificar atualizações automaticamente ao iniciar", "Automatically check for updates on launch"))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                }
-                .toggleStyle(.checkbox)
-            }
-
-            Divider()
-                .background(Color.white.opacity(0.08))
-
-            // Security Section
-            securitySection
-
-            Divider()
-                .background(Color.white.opacity(0.08))
-
-            // Updates Section
-            updateSection
-
-            Divider()
-                .background(Color.white.opacity(0.08))
-
-            // Footer actions
-            HStack {
-                Button {
-                    store.openHomeAssistantInBrowser()
-                } label: {
-                    Label("Abrir Web UI (:8123)", systemImage: "safari")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.75))
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    NSApplication.shared.terminate(nil)
-                } label: {
-                    Label("Encerrar HaBar", systemImage: "power")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(AppTheme.dangerRed)
-                }
-                .buttonStyle(.plain)
-            }
+                Button(L10n.t("Concluído", "Done")) { store.isShowingSettings = false }
+                    .keyboardShortcut(.cancelAction)
+            }.padding(16)
         }
+        .background(AppTheme.solidBackground)
+        .preferredColorScheme(store.themeMode.colorScheme)
+        .transaction { if reduceMotion { $0.animation = nil } }
         .onAppear {
-            urlInput = store.serverURLString
-            tokenInput = store.accessToken
-            launchManager.refreshStatus()
-            bonjour.startBrowsing()
+            urlInput = store.serverURLString; tokenInput = store.accessToken
+            if !store.isScreenshotPreview { launchManager.refreshStatus(); bonjour.startBrowsing() }
         }
-        .onDisappear {
-            bonjour.stopBrowsing()
+        .onDisappear { showToken = false; bonjour.stopBrowsing() }
+        .onChange(of: store.isShowingSettings) { _, visible in
+            showToken = false
+            if visible { urlInput = store.serverURLString; tokenInput = store.accessToken }
+            else { tokenInput = "" }
         }
+        .onChange(of: urlInput) { _, _ in result = nil; saved = false }
+        .onChange(of: tokenInput) { _, _ in result = nil; saved = false }
     }
 
-    @ViewBuilder
-    private func testResultBanner(for result: ConnectionTestResult) -> some View {
-        HStack(spacing: 6) {
-            switch result {
-            case .success(let version):
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(AppTheme.greenOnline)
-                Text("Conectado com sucesso! Home Assistant \(version)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-            case .unauthorized:
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(AppTheme.dangerRed)
-                Text("Erro 401: Token inválido ou expirado.")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(AppTheme.dangerRed)
-            case .unreachable:
-                Image(systemName: "wifi.exclamationmark")
-                    .foregroundColor(.orange)
-                Text("Servidor inacessível. Verifique rede e porta.")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.orange)
-            case .invalidURL:
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text("URL inválida. Use formato http://ip:8123")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.orange)
+    private var connectionSection: some View {
+        Section {
+            TextField(L10n.t("URL do servidor", "Server URL"), text: $urlInput, prompt: Text("https://homeassistant.example"))
+                .textFieldStyle(.roundedBorder)
+            if URL(string: urlInput)?.scheme?.lowercased() == "http" {
+                Label(L10n.t("HTTP não criptografa seu token. Use HTTPS para acesso remoto.", "HTTP doesn't encrypt your token. Use HTTPS for remote access."), systemImage: "lock.open")
+                    .font(.caption).foregroundColor(.orange)
             }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.04), borderColor: Color.white.opacity(0.09))
-    }
-
-    private var updateSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("HaBar v\(AppInfo.version)")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.85))
-
-                    if let msg = store.updateCheckMessage {
-                        Text(msg)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(store.availableUpdate != nil ? AppTheme.amberAccent : .white.opacity(0.55))
-                    }
+            if let error = bonjour.errorMessage { Text(error).font(.caption).foregroundColor(.secondary) }
+            ForEach(bonjour.discoveredServers) { server in
+                Button { urlInput = server.urlString } label: {
+                    Label("\(server.name) — \(server.urlString)", systemImage: "network")
                 }
-
+            }
+            HStack {
+                Group {
+                    if showToken { TextField(L10n.t("Token de acesso", "Access token"), text: $tokenInput) }
+                    else { SecureField(L10n.t("Token de acesso", "Access token"), text: $tokenInput) }
+                }.textFieldStyle(.roundedBorder)
+                Button { showToken.toggle() } label: { Image(systemName: showToken ? "eye.slash" : "eye") }
+                    .accessibilityLabel(showToken ? L10n.t("Ocultar token", "Hide token") : L10n.t("Mostrar token", "Show token"))
+                Button(L10n.t("Colar", "Paste")) {
+                    if let text = NSPasteboard.general.string(forType: .string) { tokenInput = text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                }
+            }
+            Text(L10n.t("Crie um token de longa duração em Perfil → Segurança no Home Assistant. A credencial é armazenada somente no Chaves do macOS.", "Create a long-lived token under Profile → Security in Home Assistant. The credential is stored only in macOS Keychain."))
+                .font(.caption).foregroundColor(.secondary)
+            HStack {
+                Button(testing ? L10n.t("Testando…", "Testing…") : L10n.t("Testar conexão", "Test connection")) { testConnection() }
+                    .disabled(testing || tokenInput.isEmpty)
+                if testing { ProgressView().controlSize(.small) }
                 Spacer()
-
-                Button {
-                    Task {
-                        isCheckingUpdates = true
-                        await store.checkForUpdates(userInitiated: true)
-                        isCheckingUpdates = false
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        if isCheckingUpdates {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        Text(isCheckingUpdates ? L10n.t("Buscando…", "Checking…") : L10n.t("Buscar Atualização", "Check for Updates"))
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.75))
-                }
-                .buttonStyle(.plain)
-                .disabled(isCheckingUpdates)
+                Button(L10n.t("Salvar e conectar", "Save and connect")) {
+                    saved = store.saveSettingsAndConnect(url: urlInput, token: tokenInput)
+                    savingError = saved ? nil : store.toast?.text
+                    if saved { showToken = false }
+                }.buttonStyle(.borderedProminent)
+                .disabled(HomeAssistantURL.normalized(urlInput) == nil)
             }
+            if let result { connectionResult(result) }
+            if saved { Label(L10n.t("Configurações salvas.", "Settings saved."), systemImage: "checkmark.circle").foregroundColor(.green) }
+            if let savingError { Text(savingError).foregroundColor(.red) }
+        } header: { Text(L10n.t("Conexão", "Connection")) }
+    }
 
-            if let update = store.availableUpdate {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(AppTheme.amberAccent)
-                        Text(L10n.t("Nova Versão v\(update.version)", "New Version v\(update.version)"))
-                            .font(.system(size: 11.5, weight: .bold))
-                            .foregroundColor(.white)
+    private func testConnection() {
+        testing = true; result = nil
+        let url = urlInput; let token = tokenInput
+        Task {
+            let response = await store.testConnection(url: url, token: token)
+            if url == urlInput && token == tokenInput { result = response }
+            testing = false
+        }
+    }
+    private func connectionResult(_ value: ConnectionTestResult) -> some View {
+        let message: String
+        switch value {
+        case .success(let version): message = L10n.t("Conectado ao Home Assistant \(version)", "Connected to Home Assistant \(version)")
+        case .invalidURL: message = HAAPIError.invalidURL.localizedDescription
+        case .unauthorized: message = HAAPIError.unauthorized.localizedDescription
+        case .forbidden: message = HAAPIError.forbidden.localizedDescription
+        case .unreachable: message = HAAPIError.connection.localizedDescription
+        }
+        return Text(message).font(.callout).foregroundColor(.secondary)
+    }
 
-                        Spacer()
-
-                        if let size = update.formattedSize {
-                            Text(size)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white.opacity(0.5))
-                        }
-                    }
-
-                    if !update.body.isEmpty {
-                        ScrollView {
-                            Text(update.body)
-                                .font(.system(size: 10.5))
-                                .foregroundColor(.white.opacity(0.8))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 90)
-                        .padding(6)
-                        .background(Color.black.opacity(0.3))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-
-                    // Actions
-                    switch store.updateStatus {
-                    case .downloading(let progress, _, _):
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(L10n.t("Baixando atualização...", "Downloading update..."))
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.9))
-                                Spacer()
-                                Text("\(Int(progress * 100))%")
-                                    .font(.system(size: 10.5, weight: .bold))
-                                    .foregroundColor(AppTheme.amberAccent)
-                            }
-                            ProgressView(value: progress, total: 1.0)
-                                .progressViewStyle(.linear)
-                                .tint(AppTheme.amberAccent)
-                        }
-                    case .readyToInstall:
-                        Button {
-                            store.applyUpdateAndRestart()
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "arrow.clockwise")
-                                Text(L10n.t("Reiniciar e Atualizar Agora", "Restart & Update Now"))
-                            }
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(AppTheme.amberAccent)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                    default:
-                        HStack(spacing: 8) {
-                            if update.downloadURL != nil {
-                                Button {
-                                    Task { await store.startInAppUpdate() }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.down.circle.fill")
-                                        Text(L10n.t("Atualizar Agora", "Update Now"))
-                                    }
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.black)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(AppTheme.amberAccent)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            Button {
-                                NSWorkspace.shared.open(update.url)
-                            } label: {
-                                Text(L10n.t("Ver no GitHub ↗", "View on GitHub ↗"))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.75))
-                            }
-                            .buttonStyle(.plain)
-
-                            Spacer()
-
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString("brew upgrade --cask habar", forType: .string)
-                                copiedBrew = true
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                    copiedBrew = false
-                                }
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: copiedBrew ? "checkmark" : "terminal")
-                                    Text(copiedBrew ? L10n.t("Copiado!", "Copied!") : "brew")
-                                }
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white.opacity(copiedBrew ? 0.95 : 0.6))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            .buttonStyle(.plain)
-                            .help(L10n.t("Copiar: brew upgrade --cask habar", "Copy: brew upgrade --cask habar"))
-                        }
-                    }
-                }
-                .padding(9)
-                .glassCard(cornerRadius: 8, fill: AppTheme.amberAccent.opacity(0.12), borderColor: AppTheme.amberAccent.opacity(0.25))
+    private var preferencesSection: some View {
+        Section {
+            Picker(L10n.t("Aparência", "Appearance"), selection: $store.themeMode) {
+                ForEach(AppThemeMode.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            Picker(L10n.t("Idioma", "Language"), selection: $store.language) {
+                ForEach(AppLanguage.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            Picker(L10n.t("Cômodo inicial", "Opening room"), selection: $store.defaultOpeningRoomId) {
+                ForEach(store.rooms) { Text($0.displayName).tag($0.id) }
+            }
+            Picker(L10n.t("Barra de menus", "Menu bar"), selection: $store.menuBarDisplayMode) {
+                ForEach(MenuBarDisplayMode.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            sensorPickers
+            Toggle(L10n.t("Atalho global ⌥⌘H", "Global shortcut ⌥⌘H"), isOn: $store.hotKeyEnabled)
+            Toggle(L10n.t("Iniciar com o macOS", "Launch at login"), isOn: Binding(get: { launchManager.isEnabled }, set: { launchManager.setEnabled($0) }))
+            if let error = launchManager.errorMessage { Text(error).font(.caption).foregroundColor(.red) }
+            if launchManager.needsApproval {
+                Button(L10n.t("Autorizar nos Ajustes do Sistema", "Approve in System Settings")) { SMAppService.openSystemSettingsLoginItems() }
+            }
+        } header: { Text(L10n.t("Preferências", "Preferences")) }
+    }
+    private var sensorPickers: some View {
+        Group {
+            Picker(L10n.t("Sensor de temperatura", "Temperature sensor"), selection: $store.temperatureSensorId) {
+                Text(L10n.t("Automático, se houver apenas um", "Automatic, if only one exists")).tag("")
+                ForEach(store.devices.filter { $0.deviceClass == "temperature" }) { Text($0.name).tag($0.id) }
+            }
+            Picker(L10n.t("Sensor de potência", "Power sensor"), selection: $store.powerSensorId) {
+                Text(L10n.t("Automático, se houver apenas um", "Automatic, if only one exists")).tag("")
+                ForEach(store.devices.filter { $0.deviceClass == "power" }) { Text($0.name).tag($0.id) }
             }
         }
     }
-
     private var securitySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        Section {
+            Toggle(L10n.t("Exigir autenticação para abrir acessos", "Require authentication to open access controls"), isOn: $store.requireBiometricsForSensitiveActions)
+            Text(L10n.t("Usa a autenticação do macOS, incluindo Touch ID ou senha. Se ela falhar, nenhum comando de abertura é enviado.", "Uses macOS authentication, including Touch ID or password. If authentication fails, no opening command is sent."))
+                .font(.caption).foregroundColor(.secondary)
+            Toggle(L10n.t("Confirmar antes de apagar todas as luzes", "Confirm before turning off all lights"), isOn: $store.confirmTurnOffAll)
+        } header: { Text(L10n.t("Segurança", "Security")) }
+    }
+    private var updatesSection: some View {
+        Section {
             HStack {
-                Image(systemName: "lock.shield.fill")
-                    .foregroundColor(AppTheme.amberAccent)
-                Text(L10n.t("Segurança & Confirmações", "Security & Confirmations"))
-                    .font(.system(size: 11.5, weight: .bold))
-                    .foregroundColor(.white)
+                Text("HaBar \(AppInfo.version)")
+                Spacer()
+                Button(L10n.t("Buscar atualização", "Check for updates")) { Task { await store.checkForUpdates(userInitiated: true) } }
+                    .disabled(updateBusy)
             }
-
-            if BiometricAuthHelper.isBiometricsAvailable {
-                Toggle(isOn: $store.requireBiometricsForSensitiveActions) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "touchid")
-                        Text(L10n.t("Exigir Touch ID para destrancar fechaduras", "Require Touch ID to unlock doors"))
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundColor(.white.opacity(0.9))
-                    }
+            Toggle(L10n.t("Verificar atualizações ao iniciar", "Check for updates on launch"), isOn: $store.autoCheckUpdates)
+            if let message = store.updateCheckMessage { Text(message).font(.callout) }
+            if !AppUpdater.supportsSecureUpdates {
+                Text(L10n.t("Esta instalação não contém uma chave pública de atualização válida. Instale uma versão oficial do HaBar.", "This installation has no valid update public key. Install an official HaBar release."))
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            if let release = store.availableUpdate {
+                Text(release.body).font(.caption).lineLimit(6)
+                updateActions(release)
+            }
+        } header: { Text(L10n.t("Atualizações", "Updates")) }
+    }
+    private var updateBusy: Bool {
+        switch store.updateStatus { case .checking, .downloading, .readyToInstall, .installing: return true; default: return false }
+    }
+    @ViewBuilder private func updateActions(_ release: ReleaseInfo) -> some View {
+        switch store.updateStatus {
+        case .downloading(let progress, _, _): ProgressView(value: progress)
+        case .readyToInstall: Button(L10n.t("Reiniciar e atualizar", "Restart and update")) { store.applyUpdateAndRestart() }
+        case .installing: ProgressView()
+        default:
+            if case .failed(let reason) = store.updateStatus { Text(reason).foregroundColor(.red) }
+            HStack {
+                if AppUpdater.supportsSecureUpdates && release.downloadURL != nil {
+                    Button(L10n.t("Baixar atualização", "Download update")) { Task { await store.startInAppUpdate() } }
                 }
-                .toggleStyle(.checkbox)
-            }
-
-            Toggle(isOn: $store.confirmTurnOffAll) {
-                Text(L10n.t("Confirmar antes de 'Apagar Tudo'", "Confirm before 'Turn Off All'"))
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-            }
-            .toggleStyle(.checkbox)
-
-            Button {
-                isShowingAuditLog.toggle()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock.arrow.circlepath")
-                    Text(L10n.t("Histórico de Ações Recentes (\(auditLogger.entries.count))", "Recent Actions History (\(auditLogger.entries.count))"))
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(AppTheme.amberAccent)
-            }
-            .buttonStyle(.plain)
-
-            if isShowingAuditLog {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(L10n.t("Últimas 50 ações:", "Last 50 actions:"))
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.6))
-                        Spacer()
-                        Button(L10n.t("Limpar", "Clear")) {
-                            auditLogger.clear()
-                        }
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white.opacity(0.5))
-                        .buttonStyle(.plain)
-                    }
-
-                    if auditLogger.entries.isEmpty {
-                        Text(L10n.t("Nenhuma ação registrada.", "No actions logged."))
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.4))
-                            .padding(.vertical, 4)
-                    } else {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(auditLogger.entries) { entry in
-                                    HStack(spacing: 6) {
-                                        Text(entry.formattedTime)
-                                            .font(.system(size: 9.5, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.45))
-                                        Text(entry.entityName)
-                                            .font(.system(size: 10, weight: .medium))
-                                            .foregroundColor(.white.opacity(0.9))
-                                        Text("•")
-                                            .foregroundColor(.white.opacity(0.3))
-                                        Text(entry.action)
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundColor(entry.wasBiometric ? AppTheme.amberAccent : .white.opacity(0.75))
-                                        Spacer()
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 100)
-                        .padding(6)
-                        .background(Color.black.opacity(0.3))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-                .padding(8)
-                .glassCard(cornerRadius: 8, fill: Color.white.opacity(0.03), borderColor: Color.white.opacity(0.08))
+                Link(L10n.t("Ver versão no GitHub", "View release on GitHub"), destination: release.url)
             }
         }
+    }
+    private var historySection: some View {
+        Section {
+            if let error = auditLogger.persistenceError { Text(error).font(.callout).foregroundColor(.red) }
+            DisclosureGroup(L10n.t("Últimos 50 registros", "Last 50 entries"), isExpanded: $showHistory) {
+                if auditLogger.entries.isEmpty { Text(L10n.t("Nenhuma ação registrada", "No recorded actions")) }
+                ForEach(auditLogger.entries) { entry in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(entry.formattedTime) · \(entry.entityName)").font(.callout)
+                        Text("\(entry.action) · \(entry.outcomeLabel)").font(.caption).foregroundColor(.secondary)
+                        if entry.authenticated == true { Text(L10n.t("Autenticado pelo macOS", "Authenticated by macOS")).font(.caption) }
+                    }
+                }
+                Button(L10n.t("Limpar histórico", "Clear history"), role: .destructive) { auditLogger.clear() }
+            }
+        } header: { Text(L10n.t("Histórico local", "Local history")) }
     }
 }

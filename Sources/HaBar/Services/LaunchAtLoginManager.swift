@@ -6,6 +6,8 @@ public final class LaunchAtLoginManager: ObservableObject {
     public static let shared = LaunchAtLoginManager()
 
     @Published public private(set) var isEnabled: Bool = false
+    @Published public private(set) var errorMessage: String?
+    @Published public private(set) var needsApproval = false
 
     public init() {
         refreshStatus()
@@ -14,11 +16,13 @@ public final class LaunchAtLoginManager: ObservableObject {
     public func refreshStatus() {
         if #available(macOS 13.0, *) {
             isEnabled = (SMAppService.mainApp.status == .enabled)
+            needsApproval = SMAppService.mainApp.status == .requiresApproval
         }
     }
 
     public func setEnabled(_ enable: Bool) {
         guard #available(macOS 13.0, *) else { return }
+        errorMessage = nil
         do {
             if enable {
                 if SMAppService.mainApp.status != .enabled {
@@ -30,7 +34,7 @@ public final class LaunchAtLoginManager: ObservableObject {
                 }
             }
         } catch {
-            // Service management may reject when running outside /Applications or under ad-hoc signing
+            errorMessage = error.localizedDescription
         }
         refreshStatus()
     }

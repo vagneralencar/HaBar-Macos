@@ -32,13 +32,6 @@ public enum KeychainHelper {
                 ? "http://homeassistant.local:8123"
                 : saved
         }
-        set {
-            let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !isIsolatedForTesting {
-                UserDefaults.standard.set(clean, forKey: serverURLKey)
-            }
-            writeConfigFile(serverURL: clean, token: loadToken())
-        }
     }
 
     // MARK: - Optional advanced settings (config.json only)
@@ -58,7 +51,7 @@ public enum KeychainHelper {
            !suffixes.isEmpty {
             return suffixes
         }
-        return ["_nao_perturbe", "_dnd"]
+        return []
     }
 
     public static var stripScenePrefixes: [String] {
@@ -75,10 +68,7 @@ public enum KeychainHelper {
     ///   { "entity_id": "script.ac_on", "name": "AC on", "icon": "snowflake", "room": "office" }
     /// ]
     /// ```
-    public static let defaultScriptCommands: [ScriptCommand] = [
-        ScriptCommand(entityId: "script.jarvis_ar_escritorio_ligar_24", name: "Ar · ligar a 24 °C", icon: "snowflake", roomId: "escritorio"),
-        ScriptCommand(entityId: "script.jarvis_ar_escritorio_desligar", name: "Ar · desligar", icon: "power", roomId: "escritorio")
-    ]
+    public static let defaultScriptCommands: [ScriptCommand] = []
 
     public static var scriptCommands: [ScriptCommand] {
         if let fileCfg = readConfigFile(),
@@ -111,58 +101,91 @@ public enum KeychainHelper {
 
     // MARK: - Token
 
-    public static func saveToken(_ token: String) {
+    public struct StorageError: LocalizedError {
+        let status: OSStatus
+        public var errorDescription: String? {
+            L10n.t("Não foi possível acessar o Chaves do macOS", "Couldn't access macOS Keychain") + " (\(status))."
+        }
+    }
+
+    private static var testTokens: [String: String] = [:]
+    public static var lastError: String?
+    static var testingWriteError: OSStatus?
+
+    private static func account(for server: String) -> String {
+        "ha_token:" + (HomeAssistantURL.normalized(server) ?? server)
+    }
+
+    private static func query(account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+
+    public static func saveConnection(url: String, token: String) throws {
+        guard let normalized = HomeAssistantURL.normalized(url) else { throw HAAPIError.invalidURL }
+        try saveToken(token, server: normalized)
+        try writeConfigFile(serverURL: normalized)
+        if !isIsolatedForTesting {
+            UserDefaults.standard.set(normalized, forKey: serverURLKey)
+            UserDefaults.standard.removeObject(forKey: tokenDefaultsKey)
+            SecItemDelete(query(account: tokenAccount) as CFDictionary)
+        }
+        lastError = nil
+    }
+
+    public static func saveToken(_ token: String, server: String? = nil) throws {
+        let key = account(for: server ?? serverURLString)
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        writeConfigFile(serverURL: serverURLString, token: trimmed)
-        guard !isIsolatedForTesting else { return }
+        if isIsolatedForTesting {
+            if let status = testingWriteError { throw StorageError(status: status) }
+            testTokens[key] = trimmed; return
+        }
+        let base = query(account: key)
+        if trimmed.isEmpty {
+            let status = SecItemDelete(base as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw StorageError(status: status) }
+            return
+        }
+        let attributes: [String: Any] = [kSecValueData as String: Data(trimmed.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        var status = SecItemUpdate(base as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(base.merging(attributes, uniquingKeysWith: { _, new in new }) as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw StorageError(status: status) }
+    }
 
-        UserDefaults.standard.set(trimmed, forKey: tokenDefaultsKey)
-
-        guard let data = trimmed.data(using: .utf8) else { return }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: tokenAccount
-        ]
-        SecItemDelete(query as CFDictionary)
-
-        guard !trimmed.isEmpty else { return }
-        var insertQuery = query
-        insertQuery[kSecValueData as String] = data
-        insertQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(insertQuery as CFDictionary, nil)
+    private static func readToken(account: String) throws -> String? {
+        if isIsolatedForTesting { return testTokens[account] }
+        var request = query(account: account)
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = item as? Data else { throw StorageError(status: status) }
+        return String(data: data, encoding: .utf8)
     }
 
     public static func loadToken() -> String {
-        if let fileCfg = readConfigFile(),
-           let fileToken = fileCfg["token"] as? String,
-           !fileToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return fileToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard !isIsolatedForTesting else { return "" }
-
-        if let defaultsToken = UserDefaults.standard.string(forKey: tokenDefaultsKey),
-           !defaultsToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return defaultsToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: tokenAccount,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            return ""
-        }
-        return token.trimmingCharacters(in: .whitespacesAndNewlines)
+        let server = serverURLString
+        do {
+            let existing = try readToken(account: account(for: server))
+            let legacy = try (readConfigFile()?["token"] as? String)
+                ?? (isIsolatedForTesting ? nil : UserDefaults.standard.string(forKey: tokenDefaultsKey))
+                ?? (try readToken(account: tokenAccount))
+            if let token = existing ?? legacy, !token.isEmpty {
+                // Remove plaintext copies only after the secure write succeeds.
+                if legacy != nil { try saveConnection(url: server, token: token) }
+                lastError = nil
+                return token
+            }
+            lastError = nil
+        } catch { lastError = error.localizedDescription }
+        return ""
     }
+
+    public static func resetTestingStorage() { testTokens = [:]; lastError = nil; testingWriteError = nil }
 
     // MARK: - Config file
 
@@ -175,19 +198,16 @@ public enum KeychainHelper {
         return json
     }
 
-    private static func writeConfigFile(serverURL: String, token: String) {
+    private static func writeConfigFile(serverURL: String) throws {
+        if isIsolatedForTesting && configDirectoryOverride == nil { return }
         let dir = configFileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(
-            at: dir,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                               attributes: [.posixPermissions: 0o700])
         var payload = readConfigFile() ?? [:]
         payload["server_url"] = serverURL
-        payload["token"] = token
-        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
-            try? data.write(to: configFileURL, options: .atomic)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFileURL.path)
-        }
+        payload.removeValue(forKey: "token")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+        try data.write(to: configFileURL, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFileURL.path)
     }
 }

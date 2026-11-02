@@ -3,14 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="1.7.1"
-BUILD_NUMBER="7"
+VERSION="${HABAR_VERSION:-$(cat VERSION)}"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid version" >&2; exit 1; }
+BUILD_NUMBER="${HABAR_BUILD_NUMBER:-7}"
 
 echo "🔨 Building HaBar v${VERSION} (macOS Menu Bar App for Home Assistant)..."
-swift build -c release
+BUILD_ARGS=(-c release --arch arm64 --arch x86_64)
+if [ -n "${HABAR_BUILD_PATH:-}" ]; then BUILD_ARGS+=(--scratch-path "$HABAR_BUILD_PATH"); fi
+if [ "${HABAR_DISABLE_PACKAGE_SANDBOX:-0}" = "1" ]; then BUILD_ARGS+=(--disable-sandbox); fi
+BUILD_ARGS+=("$@")
+swift build "${BUILD_ARGS[@]}"
+BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
 
 APP_NAME="HaBar.app"
-APP_DIR="$(pwd)/${APP_NAME}"
+APP_DIR="${HABAR_OUTPUT_DIR:-$(pwd)}/${APP_NAME}"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
@@ -18,7 +24,7 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
-cp ".build/release/HaBar" "${MACOS_DIR}/HaBar"
+cp "${BIN_DIR}/HaBar" "${MACOS_DIR}/HaBar"
 chmod +x "${MACOS_DIR}/HaBar"
 
 if [ -f "Assets/AppIcon.icns" ]; then
@@ -58,15 +64,24 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
     <string>HaBar connects to your Home Assistant server on the local network to control scenes, lights, and smart devices.</string>
+    <key>NSBonjourServices</key>
+    <array><string>_home-assistant._tcp</string></array>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
 </dict>
 </plist>
 EOF
 
-codesign --force --deep --sign - --identifier io.github.habar.menubar "${APP_DIR}" 2>/dev/null || true
+lipo "${MACOS_DIR}/HaBar" -verify_arch arm64
+lipo "${MACOS_DIR}/HaBar" -verify_arch x86_64
+if [ -n "${HABAR_SIGNING_IDENTITY:-}" ]; then
+    codesign --force --options runtime --timestamp --sign "$HABAR_SIGNING_IDENTITY" --identifier io.github.habar.menubar "$APP_DIR"
+else
+    codesign --force --sign - --identifier io.github.habar.menubar "$APP_DIR"
+fi
+codesign --verify --deep --strict "$APP_DIR"
 
 echo "✅ App bundle generated at: ${APP_DIR}"
