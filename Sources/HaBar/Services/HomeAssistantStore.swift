@@ -603,14 +603,14 @@ public final class HomeAssistantStore: ObservableObject, HomeAssistantClientDele
             let stagedURL: URL
             if let customDownloader = downloader {
                 stagedURL = try await customDownloader(update) { [weak self] progress, received, total in
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
                         guard let self, case .downloading = self.updateStatus else { return }
                         self.updateStatus = .downloading(progress: progress, bytesReceived: received, totalBytes: total)
                     }
                 }
             } else {
                 stagedURL = try await updater.downloadAndStageUpdate(release: update) { [weak self] progress, received, total in
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
                         guard let self, case .downloading = self.updateStatus else { return }
                         self.updateStatus = .downloading(progress: progress, bytesReceived: received, totalBytes: total)
                     }

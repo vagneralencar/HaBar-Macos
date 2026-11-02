@@ -60,7 +60,7 @@ In-app updates do not require Apple Developer membership. Each release includes 
 
 The app also requires a valid macOS code signature (ad-hoc is accepted), supported architecture/OS and exact bundle version. If the running installation has an Apple Team ID, the replacement must additionally match that team and pass Gatekeeper assessment. Downloads go to disk and are size-limited; archive paths, links and expanded size are checked. Quarantine is not removed.
 
-GitHub distribution is not Apple notarization. macOS may require the user's authorization on first launch. An intermediate developer build that previously disabled in-app updates needs one manual installation of 1.8.0; subsequent updates use the embedded publisher key.
+GitHub distribution is not Apple notarization. macOS may require the user's authorization on first launch. An intermediate developer build that previously disabled in-app updates needs one manual installation of 1.8.1; subsequent updates use the embedded publisher key.
 
 The installer stages a verified sibling on the destination volume, keeps the previous bundle as a hidden `.HaBar-backup-*.app`, and restores it if replacement or launch fails. A successful `open` does not prove application health; the backup remains available for manual recovery. You may remove old backups after verifying the new version.
 

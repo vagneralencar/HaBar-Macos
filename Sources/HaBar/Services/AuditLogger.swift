@@ -89,9 +89,9 @@ public final class AuditLogger: ObservableObject {
         ioQueue.async { [weak self] in
             do {
                 if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-                Task { @MainActor in self?.persistenceError = nil }
+                Task { @MainActor [weak self] in self?.persistenceError = nil }
             } catch {
-                Task { @MainActor in self?.persistenceError = L10n.t("Não foi possível apagar o histórico salvo.", "Couldn't remove the saved history.") }
+                Task { @MainActor [weak self] in self?.persistenceError = L10n.t("Não foi possível apagar o histórico salvo.", "Couldn't remove the saved history.") }
             }
         }
     }
@@ -112,9 +112,9 @@ public final class AuditLogger: ObservableObject {
             do {
                 try data.write(to: url, options: .atomic)
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-                Task { @MainActor in self?.persistenceError = nil }
+                Task { @MainActor [weak self] in self?.persistenceError = nil }
             } catch {
-                Task { @MainActor in self?.persistenceError = L10n.t("O histórico está disponível apenas nesta sessão: não foi possível salvá-lo.", "History is available only in this session: it couldn't be saved.") }
+                Task { @MainActor [weak self] in self?.persistenceError = L10n.t("O histórico está disponível apenas nesta sessão: não foi possível salvá-lo.", "History is available only in this session: it couldn't be saved.") }
             }
         }
     }
