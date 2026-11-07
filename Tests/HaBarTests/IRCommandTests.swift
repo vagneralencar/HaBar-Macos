@@ -74,8 +74,13 @@ final class IRCommandTests: XCTestCase {
         XCTAssertEqual(ac.targetTemperature, 25)
         XCTAssertEqual(ac.fanMode, "auto")
         XCTAssertTrue(ac.formattedStatusLine.contains("estimado"))
-        HAEntityMapper.applyStateUpdate(["state":"unknown", "attributes":["assumed_state":true]], to:&ac)
+        HAEntityMapper.applyStateUpdate(["state":"unknown", "attributes":["assumed_state":true, "hvac_modes":["off","cool"]]], to:&ac)
         XCTAssertFalse(ac.isOn)
+        XCTAssertTrue(ac.canControl, "IR climate with no feedback must stay controllable after an HA restart")
+        XCTAssertTrue(ac.canToggle)
+        XCTAssertNil(ac.hvacMode)
+        HAEntityMapper.applyStateUpdate(["state":"unknown", "attributes":[:]], to:&ac)
+        XCTAssertFalse(ac.canControl, "Unknown climate with real feedback stays blocked")
     }
 
 }

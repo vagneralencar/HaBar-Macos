@@ -518,7 +518,11 @@ public enum HAEntityMapper {
         device.rawState = state
         device.deviceClass = attrs["device_class"] as? String ?? device.deviceClass
         if let stamp = attrs["last_updated"] as? String { device.updatedAt = parseTimestamp(stamp) }
-        device.availability = state == "unavailable" ? .unavailable : (["unknown", "jammed"].contains(state) ? .unknown : .available)
+        // IR/assumed-state climates have no feedback: after an HA restart they report "unknown"
+        // until the next command. They remain controllable; locks and others keep the strict rule.
+        let writeOnlyClimate = device.domain == .climate && state == "unknown" && (attrs["assumed_state"] as? Bool ?? false)
+        device.availability = state == "unavailable" ? .unavailable
+            : (["unknown", "jammed"].contains(state) && !writeOnlyClimate ? .unknown : .available)
         device.supportedFeatures = (attrs["supported_features"] as? Int) ?? 0
         device.reportedFeatures = attrs["supported_features"] as? Int
         device.mediaAttributes = attrs.compactMapValues { $0 as? String }
@@ -636,7 +640,7 @@ public enum HAEntityMapper {
         climate.temperatureStep = max(0.1, (attrs["target_temp_step"] as? Double) ?? 1)
         climate.minTemperature = attrs["min_temp"] as? Double ?? 16
         climate.maxTemperature = attrs["max_temp"] as? Double ?? 30
-        climate.hvacMode = state
+        climate.hvacMode = state == "unknown" ? nil : state
         climate.hvacModes = attrs["hvac_modes"] as? [String] ?? []
         climate.fanMode = attrs["fan_mode"] as? String
         climate.fanModes = attrs["fan_modes"] as? [String] ?? []
